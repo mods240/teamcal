@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!-- ============================================================
      TeamCal  —  共有カレンダー  Phase 3
-     BUILD 2026-07-20c
+     BUILD 2026-07-20d
      ・予定項目を拡張：ラベル／担当者／開始日時・終了日時（複数日対応）／リマインダー／メモ
      ・機材予約(eqmgr_data/reservations)を読み取り専用で参照し、
        期間重複＋担当者一致で自動紐付け。手動での追加/除外にも対応
@@ -116,10 +116,11 @@ input,select{ font-family:inherit; }
 .ev.timed{ background:var(--surface); color:var(--ink); border:1px solid var(--line); padding-left:5px; }
 .ev.timed .bar{ width:3px; align-self:stretch; border-radius:3px; flex:0 0 auto; }
 .ev.timed .hm{ color:var(--muted); font-weight:700; font-size:10px; flex:0 0 auto; }
-.ev.span{ border-radius:4px; }
-.ev.span.cont-l{ border-top-left-radius:0; border-bottom-left-radius:0; }
-.ev.span.cont-r{ border-top-right-radius:0; border-bottom-right-radius:0; }
 .more{ font-size:10.5px; font-weight:700; color:var(--muted); padding:1px 6px; }
+.span-bar{ position:absolute; display:flex; align-items:center; padding:0 8px; border-radius:6px;
+  font-size:12px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  box-sizing:border-box; cursor:pointer; box-shadow:var(--shadow-sm); transition:transform .1s, filter .12s; }
+.span-bar:active{ transform:scale(.97); filter:brightness(.95); }
 
 .fab{ position:fixed; z-index:40; right:calc(env(safe-area-inset-right) + 20px);
   bottom:calc(env(safe-area-inset-bottom) + 24px); width:60px; height:60px; border-radius:20px;
@@ -302,6 +303,37 @@ input,select{ font-family:inherit; }
   <svg width="26" height="26" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/></svg>
 </button>
 
+<!-- 車両予約の作成（機材管理システムに反映される） -->
+<div class="scrim" id="vehResScrim">
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="車両予約の作成">
+    <div class="grabber"></div>
+    <h2>🚗 車両予約を作成</h2>
+    <p class="res-hint" style="margin:0 0 14px;padding:0;">ここで作成すると、機材管理システム（kizai-kanri）の予約としても登録されます。機材管理側は次回読み込み時に反映されます。</p>
+
+    <div class="field"><label>車両</label>
+      <select class="input" id="vrVehicle"></select></div>
+    <div class="field"><label>案件名</label>
+      <input class="input" id="vrProject" placeholder="例）〇〇様 中継" autocomplete="off"></div>
+    <div class="field"><label>利用者</label>
+      <select class="input" id="vrUser"></select></div>
+    <div class="field row2">
+      <div><label>開始日</label><input class="input" id="vrStart" type="date"></div>
+      <div><label>終了日</label><input class="input" id="vrEnd" type="date"></div>
+    </div>
+    <div class="field"><label>使用場所</label>
+      <input class="input" id="vrLoc" placeholder="例）神戸営業所 発着" autocomplete="off"></div>
+    <div class="field"><label>備考</label>
+      <textarea class="textarea" id="vrNote" placeholder="任意"></textarea></div>
+
+    <div id="vrConflict" style="display:none;background:#FDECEB;color:#C0392B;border-radius:12px;padding:10px 12px;font-size:12.5px;font-weight:700;margin-bottom:10px;line-height:1.6;"></div>
+
+    <div class="actions">
+      <button class="btn btn-ghost" id="vrCancel">閉じる</button>
+      <button class="btn btn-primary" id="vrSave">予約する</button>
+    </div>
+  </div>
+</div>
+
 <!-- 予定エディタ -->
 <div class="scrim" id="editScrim">
   <div class="sheet" role="dialog" aria-modal="true" aria-label="予定の編集">
@@ -415,12 +447,12 @@ input,select{ font-family:inherit; }
    BUILD 2026-07-13d
    ============================================================ */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getDatabase, ref, onValue, push, update, remove, get }
+import { getDatabase, ref, onValue, push, update, remove, get, runTransaction }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 import { getAuth, signInAnonymously }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
-const APP_VERSION = "2026-07-20c";
+const APP_VERSION = "2026-07-20d";
 
 /* ---- kizai-kanri と同じ Firebase プロジェクト ---- */
 const firebaseConfig = {
@@ -457,6 +489,7 @@ let viewM = now.getMonth();
 let cals = [];
 let events = [];
 let reservations = [];      // eqmgr_data/reservations（読み取り専用）
+let kUsers = [];            // eqmgr_data/users（車両予約作成時の利用者選択用・読み取り専用）
 let hidden = new Set(store.get("teamcal_hidden_v1", []));
 let weekStart = store.get("teamcal_weekstart_v1", 0); // 0=日曜始まり, 1=月曜始まり
 let viewMode = store.get("teamcal_viewmode_v1", "schedule"); // "schedule" or "vehicle"
@@ -598,16 +631,52 @@ function renderGrid(){
   $("mYear").textContent = viewY;
   renderWeekhead();
   const grid = $("grid"); grid.innerHTML = "";
+  grid.style.position = "relative";
   const first = new Date(viewY, viewM, 1);
   const shift = (first.getDay() - weekStart + 7) % 7;
   const start = new Date(viewY, viewM, 1 - shift);
   const todayStr = ymd(now.getFullYear(), now.getMonth(), now.getDate());
   const maxChips = window.innerWidth < 560 ? 3 : 4;
 
+  const dateStrs = [];
   for(let i=0;i<42;i++){
     const dt = new Date(start.getFullYear(), start.getMonth(), start.getDate()+i);
-    const y=dt.getFullYear(), m=dt.getMonth(), d=dt.getDate();
-    const dateStr = ymd(y,m,d), dow = dt.getDay(), outMonth = (m!==viewM);
+    dateStrs.push(ymd(dt.getFullYear(), dt.getMonth(), dt.getDate()));
+  }
+  const visible = e => !hidden.has(e.calId) && calKind(e.calId)===viewMode;
+
+  /* 週(行)ごとに、複数日にまたがる予定を区間分解し、重ならないようレーン割当する */
+  const spanLanesByRow = [];
+  const rowLaneCount = [];
+  for(let row=0; row<6; row++){
+    const rowDates = dateStrs.slice(row*7, row*7+7);
+    const segs = [];
+    events.forEach(e=>{
+      if(!visible(e)) return;
+      if(e.startDate === evEnd(e)) return; // 単日は対象外(セル内にそのまま表示)
+      let startCol=-1, endCol=-1;
+      rowDates.forEach((d,i)=>{ if(d>=e.startDate && d<=evEnd(e)){ if(startCol===-1) startCol=i; endCol=i; } });
+      if(startCol===-1) return;
+      segs.push({ event:e, startCol, endCol });
+    });
+    segs.sort((a,b)=> a.startCol-b.startCol || (b.endCol-b.startCol)-(a.endCol-a.startCol));
+    const laneEnds = [];
+    segs.forEach(seg=>{
+      let lane = 0;
+      while(lane<laneEnds.length && laneEnds[lane] >= seg.startCol) lane++;
+      seg.lane = lane; laneEnds[lane] = seg.endCol;
+    });
+    spanLanesByRow.push(segs);
+    rowLaneCount.push(laneEnds.length);
+  }
+  const LANE_H = 20, LANE_GAP = 3, LANE_TOP = 31;
+
+  for(let i=0;i<42;i++){
+    const dateStr = dateStrs[i];
+    const [y,m,d] = dateStr.split("-").map(Number);
+    const dow = new Date(y,m-1,d).getDay();
+    const outMonth = (m-1!==viewM);
+    const rowIdx = Math.floor(i/7);
     const cell = document.createElement("button");
     cell.className = "cell" + (outMonth?" out":"") + (dateStr===todayStr?" today":"");
     cell.onclick = ()=> openDaySheet(dateStr);
@@ -615,13 +684,22 @@ function renderGrid(){
     num.className = "num" + (dow===0?" sun":"") + (dow===6?" sat":"");
     num.textContent = d; cell.appendChild(num);
 
-    const list = eventsOn(dateStr);
-    list.slice(0,maxChips).forEach(e=>{
+    if(rowLaneCount[rowIdx] > 0){
+      const spacer = document.createElement("div");
+      spacer.style.height = (rowLaneCount[rowIdx]*(LANE_H+LANE_GAP))+"px";
+      spacer.style.flex = "0 0 auto";
+      cell.appendChild(spacer);
+    }
+
+    /* 単日の予定（終日1日・時間指定）はこれまで通りセル内に表示 */
+    const dayEvents = events.filter(e=> visible(e) && e.startDate===evEnd(e) && e.startDate===dateStr)
+      .sort((a,b)=>{ if(a.allDay!==b.allDay) return a.allDay?-1:1; return (a.startTime||"").localeCompare(b.startTime||""); });
+
+    dayEvents.slice(0,maxChips).forEach(e=>{
       const c = calOf(e.calId);
-      const isSpan = e.startDate !== evEnd(e);
       const chip = document.createElement("div");
-      if(e.allDay || isSpan){
-        chip.className = "ev span" + (isSpan && dateStr!==e.startDate? " cont-l":"") + (isSpan && dateStr!==evEnd(e)? " cont-r":"");
+      if(e.allDay){
+        chip.className = "ev";
         chip.style.background = c.color;
         chip.style.color = c.textColor || "#2B332F";
         chip.innerHTML = `<span class="t">${escapeHtml(e.title)}</span>`;
@@ -633,12 +711,44 @@ function renderGrid(){
       chip.onclick = ev=>{ ev.stopPropagation(); openEditor(e, dateStr); };
       cell.appendChild(chip);
     });
-    if(list.length>maxChips){
+    if(dayEvents.length>maxChips){
       const more = document.createElement("div"); more.className="more";
-      more.textContent = `他 ${list.length-maxChips} 件`; cell.appendChild(more);
+      more.textContent = `他 ${dayEvents.length-maxChips} 件`; cell.appendChild(more);
     }
     grid.appendChild(cell);
   }
+
+  /* 連続バーは実測したセル座標をもとに、グリッドの上に重ねて描画する
+     （CSSの小技ではなく実測なので、環境によってズレたり崩れたりしない） */
+  requestAnimationFrame(()=>{
+    const old = document.getElementById("spanOverlay");
+    if(old) old.remove();
+    const overlay = document.createElement("div");
+    overlay.id = "spanOverlay";
+    overlay.style.cssText = "position:absolute; inset:0; pointer-events:none; z-index:2;";
+    const cellEls = grid.querySelectorAll(".cell");
+    spanLanesByRow.forEach((segs, rowIdx)=>{
+      segs.forEach(seg=>{
+        const startCell = cellEls[rowIdx*7+seg.startCol];
+        const endCell = cellEls[rowIdx*7+seg.endCol];
+        if(!startCell || !endCell) return;
+        const e = seg.event, c = calOf(e.calId);
+        const bar = document.createElement("div");
+        bar.className = "span-bar";
+        bar.style.left = startCell.offsetLeft + "px";
+        bar.style.top = (startCell.offsetTop + LANE_TOP + seg.lane*(LANE_H+LANE_GAP)) + "px";
+        bar.style.width = (endCell.offsetLeft + endCell.offsetWidth - startCell.offsetLeft) + "px";
+        bar.style.height = LANE_H + "px";
+        bar.style.background = c.color;
+        bar.style.color = c.textColor || "#2B332F";
+        bar.style.pointerEvents = "auto";
+        bar.textContent = e.title;
+        bar.onclick = ()=> openEditor(e, e.startDate);
+        overlay.appendChild(bar);
+      });
+    });
+    grid.appendChild(overlay);
+  });
 }
 
 /* ---- デイシート ---- */
@@ -872,6 +982,96 @@ function deleteEvent(){
   openConfirm("この予定を削除しますか？", ()=>{ remove(ref(db,"teamcal/events/"+id)); closeScrim("editScrim"); toast("削除しました"); });
 }
 
+/* ============================================================
+   車両予約の作成（機材管理システム eqmgr_data/reservations に反映）
+   ============================================================ */
+async function openVehResModal(){
+  const vehicles = cals.filter(c=>(c.kind||"schedule")==="vehicle");
+  if(vehicles.length===0){ toast("登録されている車両がありません"); return; }
+  const sel = $("vrVehicle"); sel.innerHTML = vehicles.map(v=>`<option value="${v.id}">${escapeHtml(v.name)}</option>`).join("");
+  const today = ymd(now.getFullYear(),now.getMonth(),now.getDate());
+  $("vrProject").value = ""; $("vrStart").value = today; $("vrEnd").value = today;
+  $("vrLoc").value = ""; $("vrNote").value = "";
+  $("vrConflict").style.display = "none";
+  delete $("vrSave").dataset.confirmed;
+  $("vrUser").innerHTML = `<option value="">読み込み中…</option>`;
+  openScrim("vehResScrim");
+  try{
+    const snap = await get(ref(db,"eqmgr_data/users"));
+    const v = snap.val() || {};
+    kUsers = Object.entries(v).map(([idx,u])=>u).filter(u=>u && u.id && u.name);
+    $("vrUser").innerHTML = kUsers.map(u=>`<option value="${u.id}|${escapeHtml(u.name)}">${escapeHtml(u.name)}</option>`).join("")
+      || `<option value="">(利用者が登録されていません)</option>`;
+  }catch(e){
+    $("vrUser").innerHTML = `<option value="">読み込みに失敗しました</option>`;
+  }
+}
+function vehConflicts(equipmentId, sDate, eDate){
+  return reservations.filter(r=> r.equipmentId===equipmentId && r.startDate &&
+    overlaps(sDate, eDate, r.startDate, r.endDate||r.startDate));
+}
+$("vrStart").addEventListener("change", ()=>{ if($("vrEnd").value < $("vrStart").value) $("vrEnd").value = $("vrStart").value; });
+$("vrCancel").onclick = ()=> closeScrim("vehResScrim");
+$("vrSave").onclick = async ()=>{
+  const vehCalId = $("vrVehicle").value;
+  const vehCal = cals.find(c=>c.id===vehCalId);
+  const equipmentId = vehCal && vehCal.equipmentId;
+  const projectName = $("vrProject").value.trim();
+  const userVal = $("vrUser").value;
+  const [userId, userName] = userVal ? userVal.split("|") : ["",""];
+  const sDate = $("vrStart").value;
+  let eDate = $("vrEnd").value || sDate;
+  if(eDate < sDate) eDate = sDate;
+  const useLocation = $("vrLoc").value.trim();
+  const notes = $("vrNote").value.trim();
+
+  if(!equipmentId){ toast("この車両は機材IDが見つかりません（再同期が必要な可能性があります）"); return; }
+  if(!projectName){ toast("案件名を入力してください"); return; }
+  if(!userId){ toast("利用者を選択してください"); return; }
+
+  const conflicts = vehConflicts(equipmentId, sDate, eDate);
+  if(conflicts.length>0){
+    $("vrConflict").style.display = "block";
+    $("vrConflict").innerHTML = "⚠️ 同じ期間に他の予約があります:<br>" +
+      conflicts.map(c=>`・${escapeHtml(c.projectName||"(案件名なし)")}（${c.startDate}〜${c.endDate||c.startDate}）`).join("<br>") +
+      "<br>続けて「予約する」を押すと、このまま重複して登録します。";
+    if(!$("vrSave").dataset.confirmed){ $("vrSave").dataset.confirmed = "1"; toast("重複があります。続けるにはもう一度「予約する」を押してください"); return; }
+  }
+  delete $("vrSave").dataset.confirmed;
+
+  $("vrSave").disabled = true;
+  try{
+    const projectGroupId = Date.now().toString(36)+Math.random().toString(36).slice(2);
+    const newRes = {
+      id: projectGroupId, projectGroupId,
+      startDate: sDate, endDate: eDate, returnDate: eDate, returnLocation: "",
+      equipmentId, equipmentName: vehCal.name, isVehicle: true,
+      projectName, notes, qty: 1, rentalItems: [], status: "confirmed",
+      useLocation, userId, userName, syncToTeamCal: true
+    };
+    // eqmgr_data/reservations は配列形式のため、トランザクションで安全に追記する
+    await runTransaction(ref(db,"eqmgr_data/reservations"), (current)=>{
+      const arr = Array.isArray(current) ? current.slice() : (current ? Object.values(current) : []);
+      arr.push(newRes);
+      return arr;
+    });
+    // TeamCal側にも即時反映（次回kizai-kanri起動を待たず表示されるように）
+    await update(ref(db, "teamcal/events/res_"+projectGroupId+"_veh0"), {
+      calId: vehCalId, title: "🚗 "+projectName, label: projectName, assignee: userName,
+      allDay: true, startDate: sDate, endDate: eDate, loc: useLocation, memo: notes, reminder: "",
+      sourceReservationId: projectGroupId, projectGroupId,
+      updatedBy: (auth&&auth.name)||"TeamCal", updatedAt: Date.now()
+    });
+    toast("車両予約を作成しました");
+    closeScrim("vehResScrim");
+  }catch(e){
+    toast("保存に失敗しました: "+e.message);
+    console.error(e);
+  }finally{
+    $("vrSave").disabled = false;
+  }
+};
+
 /* ---- 確認 ---- */
 let confirmCb = null;
 function openConfirm(msg,cb){ $("confirmMsg").textContent = msg; confirmCb = cb; openScrim("confirmScrim"); }
@@ -922,7 +1122,7 @@ function applyTab(mode){
   btn.onclick = ()=> applyTab(btn.dataset.mode);
 });
 applyTab(viewMode);
-$("fab").onclick = ()=> openEditor(null,null);
+$("fab").onclick = ()=>{ if(viewMode==="vehicle") openVehResModal(); else openEditor(null,null); };
 
 $("fAllday").onclick = ()=>{ if(editorReadonly) return; setAllday(!draft.allDay); };
 $("fStartDate").addEventListener("change", ()=>{ if($("fEndDate").value < $("fStartDate").value) $("fEndDate").value = $("fStartDate").value; });
@@ -942,11 +1142,11 @@ $("userClose").onclick = ()=> closeScrim("userScrim");
 $("userSave").onclick = ()=>{ const n=$("userName").value.trim(); if(auth){ auth.name=n||auth.name; store.set("teamcal_auth_v1",auth);} closeScrim("userScrim"); toast("表示名を保存しました"); };
 $("logoutBtn").onclick = logout;
 
-["editScrim","dayScrim","confirmScrim","userScrim"].forEach(id=>{
+["editScrim","dayScrim","confirmScrim","userScrim","vehResScrim"].forEach(id=>{
   $(id).addEventListener("click", e=>{ if(e.target.id===id) closeScrim(id); });
 });
 document.addEventListener("keydown", e=>{ if(e.key==="Escape")
-  ["editScrim","dayScrim","confirmScrim","userScrim"].forEach(id=>closeScrim(id)); });
+  ["editScrim","dayScrim","confirmScrim","userScrim","vehResScrim"].forEach(id=>closeScrim(id)); });
 let rz=null; window.addEventListener("resize", ()=>{ clearTimeout(rz); rz=setTimeout(renderGrid,150); });
 
 console.log("TeamCal build", APP_VERSION);
