@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!-- ============================================================
      TeamCal  —  共有カレンダー  Phase 3
-     BUILD 2026-07-13g
+     BUILD 2026-07-19b
      ・予定項目を拡張：ラベル／担当者／開始日時・終了日時（複数日対応）／リマインダー／メモ
      ・機材予約(eqmgr_data/reservations)を読み取り専用で参照し、
        期間重複＋担当者一致で自動紐付け。手動での追加/除外にも対応
@@ -71,8 +71,16 @@ input,select{ font-family:inherit; }
 .nav-arrow:active{ transform:scale(.9); }
 .monthnav .spacer{ flex:1; }
 
-.filters{ display:flex; gap:8px; margin-top:14px; overflow-x:auto; padding-bottom:2px; scrollbar-width:none; }
+.filters{ display:flex; gap:8px; margin-top:14px; overflow-x:hidden; flex-wrap:wrap; max-height:40px; }
+.filters.expanded{ max-height:none; }
 .filters::-webkit-scrollbar{ display:none; }
+.filters-toggle{ margin-top:6px; font-size:12px; font-weight:700; color:var(--green-deep); background:none; border:none; padding:2px 0; }
+.viewtabs{ display:flex; gap:8px; margin-top:14px; }
+.viewtab{ flex:0 0 auto; padding:8px 16px; border-radius:999px; font-size:13px; font-weight:700;
+  background:var(--surface); border:1px solid var(--line); color:var(--muted); box-shadow:var(--shadow-sm);
+  transition:transform .12s; }
+.viewtab:active{ transform:scale(.96); }
+.viewtab.active{ background:linear-gradient(150deg,var(--green),var(--green-deep)); color:#fff; border-color:transparent; }
 .chip{ flex:0 0 auto; display:inline-flex; align-items:center; gap:7px; padding:7px 13px 7px 11px;
   border-radius:999px; background:var(--surface); border:1px solid var(--line);
   font-size:13px; font-weight:600; box-shadow:var(--shadow-sm); transition:opacity .15s, transform .1s; }
@@ -269,7 +277,12 @@ input,select{ font-family:inherit; }
       <button class="nav-arrow" id="nextBtn" aria-label="次の月">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
     </div>
+    <div class="viewtabs" id="viewTabs">
+      <button class="viewtab active" id="tabSchedule" data-mode="schedule">📅 予定</button>
+      <button class="viewtab" id="tabVehicle" data-mode="vehicle">🚗 車両</button>
+    </div>
     <div class="filters" id="filters"></div>
+    <button class="filters-toggle" id="filtersToggle" style="display:none">すべて表示 ▾</button>
   </header>
 
   <div class="weekhead" id="weekhead"></div>
@@ -402,7 +415,7 @@ import { getDatabase, ref, onValue, push, update, remove, get }
 import { getAuth, signInAnonymously }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
-const APP_VERSION = "2026-07-13g";
+const APP_VERSION = "2026-07-19b";
 
 /* ---- kizai-kanri と同じ Firebase プロジェクト ---- */
 const firebaseConfig = {
@@ -419,11 +432,6 @@ const db = getDatabase(fbApp);
 const fbAuth = getAuth(fbApp);
 
 const WD = ["日","月","火","水","木","金","土"];
-const DEFAULT_CALS = [
-  { id:"work",    name:"撮影・案件", color:"#F0625D", order:0 },
-  { id:"office",  name:"社内",       color:"#3A9BE8", order:1 },
-  { id:"private", name:"個人",       color:"#7C6FE0", order:2 }
-];
 const REMINDER_LABEL = {5:"5分前",10:"10分前",30:"30分前",60:"1時間前",1440:"1日前"};
 
 /* ---- ローカル保存（個人設定：認証・フィルタ表示） ---- */
@@ -446,6 +454,7 @@ let events = [];
 let reservations = [];      // eqmgr_data/reservations（読み取り専用）
 let hidden = new Set(store.get("teamcal_hidden_v1", []));
 let weekStart = store.get("teamcal_weekstart_v1", 0); // 0=日曜始まり, 1=月曜始まり
+let viewMode = store.get("teamcal_viewmode_v1", "schedule"); // "schedule" or "vehicle"
 let auth = store.get("teamcal_auth_v1", null);
 let editingId = null;
 let editorReadonly = false;
@@ -460,6 +469,7 @@ const $ = id => document.getElementById(id);
 function pad(n){ return String(n).padStart(2,"0"); }
 function ymd(y,m,d){ return `${y}-${pad(m+1)}-${pad(d)}`; }
 function calOf(id){ return cals.find(c=>c.id===id) || cals[0] || {color:"#8A98A5",name:"—"}; }
+function calKind(calId){ const c = cals.find(x=>x.id===calId); return (c && c.kind) || "schedule"; }
 function escapeHtml(s){ return (s||"").replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
 function saveHidden(){ store.set("teamcal_hidden_v1",[...hidden]); }
 
@@ -469,7 +479,7 @@ function evEnd(e){ return e.endDate || e.startDate; }
 function overlaps(aS,aE,bS,bE){ return aS<=bE && bS<=aE; }
 
 function eventsOn(dateStr){
-  return events.filter(e=> !hidden.has(e.calId) && e.startDate<=dateStr && dateStr<=evEnd(e))
+  return events.filter(e=> !hidden.has(e.calId) && calKind(e.calId)===viewMode && e.startDate<=dateStr && dateStr<=evEnd(e))
     .sort((a,b)=>{
       const aSpan = a.startDate!==evEnd(a), bSpan = b.startDate!==evEnd(b);
       if(aSpan!==bSpan) return aSpan? -1:1;
@@ -526,7 +536,7 @@ function startListeners(){
 
   onValue(ref(db,"teamcal/calendars"), snap=>{
     const v = snap.val();
-    if(!v){ seedCalendars(); return; }
+    if(!v){ cals = []; renderFilters(); renderGrid(); return; }
     cals = Object.entries(v).map(([id,c])=>({id,...c})).sort((a,b)=>(a.order||0)-(b.order||0));
     renderFilters(); renderGrid();
   });
@@ -548,11 +558,6 @@ function startListeners(){
     if($("dayScrim").classList.contains("show") && daySheetDate) fillDaySheet(daySheetDate);
   });
 }
-function seedCalendars(){
-  const updates = {};
-  DEFAULT_CALS.forEach(c=> updates["teamcal/calendars/"+c.id] = {name:c.name,color:c.color,order:c.order});
-  update(ref(db), updates);
-}
 /* 旧フォーマット(date/start/end)からの自動移行（表示用。保存時に新形式で書き戻る） */
 function migrateEvent(id, e){
   if(e.startDate) return { id, ...e };
@@ -564,14 +569,26 @@ function migrateEvent(id, e){
    ============================================================ */
 function renderFilters(){
   const wrap = $("filters"); wrap.innerHTML = "";
-  cals.forEach(c=>{
+  cals.filter(c=>(c.kind||"schedule")===viewMode).forEach(c=>{
     const b = document.createElement("button");
     b.className = "chip" + (hidden.has(c.id)?" off":"");
     b.innerHTML = `<span class="dot" style="background:${c.color}"></span>${escapeHtml(c.name)}`;
     b.onclick = ()=>{ hidden.has(c.id)?hidden.delete(c.id):hidden.add(c.id); saveHidden(); renderFilters(); renderGrid(); };
     wrap.appendChild(b);
   });
+  wrap.classList.remove("expanded");
+  const toggle = $("filtersToggle");
+  toggle.textContent = "すべて表示 ▾";
+  requestAnimationFrame(()=>{
+    const overflow = wrap.scrollHeight > 44;
+    toggle.style.display = overflow ? "block" : "none";
+  });
 }
+$("filtersToggle").onclick = ()=>{
+  const wrap = $("filters");
+  const expanded = wrap.classList.toggle("expanded");
+  $("filtersToggle").textContent = expanded ? "閉じる ▴" : "すべて表示 ▾";
+};
 function renderWeekhead(){
   const labels = weekStart===1 ? ["月","火","水","木","金","土","日"] : ["日","月","火","水","木","金","土"];
   $("weekhead").innerHTML = labels.map((l,i)=>{
@@ -820,7 +837,7 @@ function openEditor(ev, presetDate){
 }
 function renderCalPick(){
   const wrap = $("calpick"); wrap.innerHTML = "";
-  cals.forEach(c=>{
+  cals.filter(c=>(c.kind||"schedule")!=="vehicle").forEach(c=>{
     const sel = c.id===draft.calId;
     const b = document.createElement("button");
     b.className = "calpick-btn" + (sel?" sel":""); if(sel){ b.style.background=c.color; }
@@ -893,6 +910,17 @@ $("weekStartBtn").onclick = ()=>{
   renderGrid();
 };
 $("weekStartBtn").textContent = weekStart===1 ? "月" : "日";
+[$("tabSchedule"),$("tabVehicle")].forEach(btn=>{
+  btn.onclick = ()=>{
+    viewMode = btn.dataset.mode;
+    store.set("teamcal_viewmode_v1", viewMode);
+    $("tabSchedule").classList.toggle("active", viewMode==="schedule");
+    $("tabVehicle").classList.toggle("active", viewMode==="vehicle");
+    renderFilters(); renderGrid();
+  };
+});
+$("tabSchedule").classList.toggle("active", viewMode==="schedule");
+$("tabVehicle").classList.toggle("active", viewMode==="vehicle");
 $("fab").onclick = ()=> openEditor(null,null);
 
 $("fAllday").onclick = ()=>{ if(editorReadonly) return; setAllday(!draft.allDay); };
