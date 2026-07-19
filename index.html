@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!-- ============================================================
      TeamCal  —  共有カレンダー  Phase 3
-     BUILD 2026-07-19d
+     BUILD 2026-07-19e
      ・予定項目を拡張：ラベル／担当者／開始日時・終了日時（複数日対応）／リマインダー／メモ
      ・機材予約(eqmgr_data/reservations)を読み取り専用で参照し、
        期間重複＋担当者一致で自動紐付け。手動での追加/除外にも対応
@@ -415,7 +415,7 @@ import { getDatabase, ref, onValue, push, update, remove, get }
 import { getAuth, signInAnonymously }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
-const APP_VERSION = "2026-07-19d";
+const APP_VERSION = "2026-07-19e";
 
 /* ---- kizai-kanri と同じ Firebase プロジェクト ---- */
 const firebaseConfig = {
@@ -810,7 +810,8 @@ function openEditor(ev, presetDate){
   $("editDelete").style.display = (ev && !isSynced) ? "block" : "none";
   $("editSave").style.display = isSynced ? "none" : "block";
   const today = ymd(now.getFullYear(),now.getMonth(),now.getDate());
-  draft = ev ? {...ev} : { calId:(cals[0]&&cals[0].id)||"work", title:"", allDay:false,
+  const defaultCal = cals.find(c=>(c.kind||"schedule")==="schedule") || cals[0];
+  draft = ev ? {...ev} : { calId:(defaultCal&&defaultCal.id)||"work", title:"", allDay:false,
     startDate: presetDate || today, endDate: presetDate || today,
     startTime:"10:00", endTime:"11:00", label:"", assignee:"", loc:"", memo:"", reminder:"" };
 
