@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!-- ============================================================
      TeamCal  —  共有カレンダー  Phase 3
-     BUILD 2026-07-19e
+     BUILD 2026-07-19f
      ・予定項目を拡張：ラベル／担当者／開始日時・終了日時（複数日対応）／リマインダー／メモ
      ・機材予約(eqmgr_data/reservations)を読み取り専用で参照し、
        期間重複＋担当者一致で自動紐付け。手動での追加/除外にも対応
@@ -415,7 +415,7 @@ import { getDatabase, ref, onValue, push, update, remove, get }
 import { getAuth, signInAnonymously }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
-const APP_VERSION = "2026-07-19e";
+const APP_VERSION = "2026-07-19f";
 
 /* ---- kizai-kanri と同じ Firebase プロジェクト ---- */
 const firebaseConfig = {
@@ -627,6 +627,7 @@ function renderGrid(){
       if(e.allDay || isSpan){
         chip.className = "ev span" + (isSpan && dateStr!==e.startDate? " cont-l":"") + (isSpan && dateStr!==evEnd(e)? " cont-r":"");
         chip.style.background = c.color;
+        chip.style.color = c.textColor || "#2B332F";
         chip.innerHTML = `<span class="t">${escapeHtml(e.title)}</span>`;
       }else{
         chip.className = "ev timed";
