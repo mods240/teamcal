@@ -1,0 +1,903 @@
+<!DOCTYPE html>
+<!-- ============================================================
+     TeamCal  —  共有カレンダー  Phase 3
+     BUILD 2026-07-13e
+     ・予定項目を拡張：ラベル／担当者／開始日時・終了日時（複数日対応）／リマインダー／メモ
+     ・機材予約(eqmgr_data/reservations)を読み取り専用で参照し、
+       期間重複＋担当者一致で自動紐付け。手動での追加/除外にも対応
+     ・kizai-kanri から直接反映された予定(sourceReservationId付き)は閲覧専用
+       （編集はkizai-kanri側で行う）。個人ごとの自動作成カレンダーにも対応
+     ・データは teamcal/ ノードに格納（既存 eqmgr_* には一切書き込まない）
+     ・auth != null ルールのため匿名認証(signInAnonymously)を使用
+     ============================================================ -->
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>TeamCal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;500;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --green:#16BFA0; --green-deep:#0E9C83; --green-tint:#E3F7F1; --green-soft:#F0FBF8;
+  --bg:#F5F8F7; --surface:#FFFFFF; --ink:#1F2B29; --muted:#72817D; --line:#E7ECEA;
+  --sun:#E5544B; --sat:#3F82D6; --amber:#D98C1F;
+  --shadow-sm:0 1px 2px rgba(20,40,36,.06),0 1px 3px rgba(20,40,36,.05);
+  --shadow-md:0 6px 20px rgba(20,40,36,.10),0 2px 6px rgba(20,40,36,.06);
+  --shadow-fab:0 8px 22px rgba(14,156,131,.38);
+  --font:"M PLUS Rounded 1c",-apple-system,BlinkMacSystemFont,"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic","YuGothic","Meiryo",sans-serif;
+}
+*{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+html,body{ margin:0; height:100%; }
+body{ font-family:var(--font); color:var(--ink); background:var(--bg);
+  font-feature-settings:"palt" 1; -webkit-font-smoothing:antialiased; overscroll-behavior-y:none; }
+button{ font-family:inherit; cursor:pointer; border:none; background:none; color:inherit; }
+input,select{ font-family:inherit; }
+:focus-visible{ outline:2.5px solid var(--green); outline-offset:2px; border-radius:8px; }
+
+.app{ max-width:1040px; margin:0 auto; min-height:100%; display:flex; flex-direction:column;
+  padding-bottom:calc(96px + env(safe-area-inset-bottom)); }
+
+/* ===== ヘッダー ===== */
+.appbar{ position:sticky; top:0; z-index:30; background:rgba(245,248,247,.86);
+  backdrop-filter:saturate(180%) blur(12px); -webkit-backdrop-filter:saturate(180%) blur(12px);
+  border-bottom:1px solid var(--line); padding:calc(env(safe-area-inset-top) + 12px) 16px 10px; }
+.appbar-top{ display:flex; align-items:center; gap:10px; }
+.brand{ display:flex; align-items:center; gap:9px; margin-right:auto; }
+.brand .mark{ width:30px; height:30px; border-radius:9px;
+  background:linear-gradient(150deg,var(--green),var(--green-deep));
+  display:grid; place-items:center; box-shadow:var(--shadow-sm); color:#fff; }
+.brand .name{ font-weight:800; font-size:18px; letter-spacing:.02em; display:flex; align-items:center; gap:6px; }
+.conn{ width:8px; height:8px; border-radius:50%; background:#C7D0CD; transition:background .3s;
+  box-shadow:0 0 0 3px rgba(0,0,0,.03); }
+.conn.on{ background:var(--green); box-shadow:0 0 0 3px var(--green-tint); }
+
+.icon-btn{ width:38px; height:38px; border-radius:12px; display:grid; place-items:center;
+  background:var(--surface); border:1px solid var(--line); box-shadow:var(--shadow-sm);
+  color:var(--ink); transition:transform .12s, background .15s; }
+.icon-btn:active{ transform:scale(.92); }
+.today-btn{ font-weight:700; font-size:13px; color:var(--green-deep); background:var(--surface);
+  border:1px solid var(--line); padding:0 14px; height:38px; border-radius:999px; box-shadow:var(--shadow-sm);
+  transition:transform .12s; }
+.today-btn:active{ transform:scale(.95); }
+
+.monthnav{ display:flex; align-items:center; gap:6px; margin-top:12px; }
+.monthnav .title{ font-size:22px; font-weight:800; display:flex; align-items:baseline; gap:7px; }
+.monthnav .title .yr{ font-size:14px; font-weight:600; color:var(--muted); }
+.nav-arrow{ width:36px; height:36px; border-radius:11px; display:grid; place-items:center;
+  transition:background .15s, transform .1s; }
+.nav-arrow:hover{ background:var(--green-tint); color:var(--green-deep); }
+.nav-arrow:active{ transform:scale(.9); }
+.monthnav .spacer{ flex:1; }
+
+.filters{ display:flex; gap:8px; margin-top:14px; overflow-x:auto; padding-bottom:2px; scrollbar-width:none; }
+.filters::-webkit-scrollbar{ display:none; }
+.chip{ flex:0 0 auto; display:inline-flex; align-items:center; gap:7px; padding:7px 13px 7px 11px;
+  border-radius:999px; background:var(--surface); border:1px solid var(--line);
+  font-size:13px; font-weight:600; box-shadow:var(--shadow-sm); transition:opacity .15s, transform .1s; }
+.chip:active{ transform:scale(.96); }
+.chip .dot{ width:11px; height:11px; border-radius:50%; flex:0 0 auto; }
+.chip.off{ opacity:.42; }
+.chip.off .dot{ background:#C7D0CD !important; }
+
+.weekhead{ display:grid; grid-template-columns:repeat(7,1fr); padding:10px 8px 6px;
+  position:sticky; top:calc(env(safe-area-inset-top) + 150px); z-index:10; }
+.weekhead div{ text-align:center; font-size:12px; font-weight:700; color:var(--muted); }
+.weekhead .sun{ color:var(--sun); } .weekhead .sat{ color:var(--sat); }
+
+.grid{ display:grid; grid-template-columns:repeat(7,1fr); gap:6px; padding:0 8px 8px; }
+.cell{ position:relative; min-height:104px; background:var(--surface); border-radius:12px;
+  padding:6px 5px 5px; box-shadow:var(--shadow-sm); display:flex; flex-direction:column; gap:3px;
+  transition:transform .1s, box-shadow .15s; overflow:hidden; text-align:left; width:100%; }
+.cell:active{ transform:scale(.985); }
+.cell.out{ background:var(--green-soft); box-shadow:none; }
+.cell.out .num{ color:#B6C2BE; }
+.cell .num{ font-size:13px; font-weight:700; width:24px; height:24px; display:grid; place-items:center;
+  border-radius:50%; margin-bottom:1px; }
+.cell .num.sun{ color:var(--sun); } .cell .num.sat{ color:var(--sat); }
+.cell.today .num{ background:var(--green); color:#fff !important; box-shadow:var(--shadow-fab); }
+.cell.today{ box-shadow:0 0 0 2px var(--green) inset, var(--shadow-sm); }
+.ev{ display:flex; align-items:center; gap:4px; font-size:11px; font-weight:600; line-height:1.35;
+  padding:2.5px 6px; border-radius:7px; color:#fff; white-space:nowrap; overflow:hidden;
+  text-overflow:ellipsis; transition:transform .1s, filter .12s; }
+.ev:active{ transform:scale(.97); filter:brightness(.95); }
+.ev .t{ overflow:hidden; text-overflow:ellipsis; }
+.ev.timed{ background:var(--surface); color:var(--ink); border:1px solid var(--line); padding-left:5px; }
+.ev.timed .bar{ width:3px; align-self:stretch; border-radius:3px; flex:0 0 auto; }
+.ev.timed .hm{ color:var(--muted); font-weight:700; font-size:10px; flex:0 0 auto; }
+.ev.span{ border-radius:4px; }
+.ev.span.cont-l{ border-top-left-radius:0; border-bottom-left-radius:0; }
+.ev.span.cont-r{ border-top-right-radius:0; border-bottom-right-radius:0; }
+.more{ font-size:10.5px; font-weight:700; color:var(--muted); padding:1px 6px; }
+
+.fab{ position:fixed; z-index:40; right:calc(env(safe-area-inset-right) + 20px);
+  bottom:calc(env(safe-area-inset-bottom) + 24px); width:60px; height:60px; border-radius:20px;
+  background:linear-gradient(150deg,var(--green),var(--green-deep)); color:#fff; display:grid;
+  place-items:center; box-shadow:var(--shadow-fab); transition:transform .14s; }
+.fab:active{ transform:scale(.9) rotate(90deg); }
+
+/* ===== モーダル ===== */
+.scrim{ position:fixed; inset:0; z-index:50; background:rgba(20,36,32,.42); backdrop-filter:blur(2px);
+  display:flex; align-items:flex-end; justify-content:center; opacity:0; pointer-events:none;
+  transition:opacity .22s; }
+.scrim.center{ align-items:center; }
+.scrim.show{ opacity:1; pointer-events:auto; }
+.sheet{ width:100%; max-width:520px; background:var(--surface); border-radius:24px 24px 0 0;
+  box-shadow:var(--shadow-md); padding:8px 20px calc(env(safe-area-inset-bottom) + 22px);
+  transform:translateY(24px); transition:transform .26s cubic-bezier(.2,.9,.3,1);
+  max-height:92vh; overflow-y:auto; }
+.scrim.center .sheet{ border-radius:24px; max-width:420px; margin:16px; transform:scale(.94); }
+.scrim.show .sheet{ transform:translateY(0); }
+.scrim.center.show .sheet{ transform:scale(1); }
+.grabber{ width:40px; height:4px; border-radius:99px; background:var(--line); margin:8px auto 14px; }
+.sheet h2{ font-size:18px; font-weight:800; margin:2px 0 16px; }
+.sheet h3{ font-size:13px; font-weight:800; color:var(--muted); margin:22px 0 8px; }
+.field{ margin-bottom:14px; }
+.field > label{ display:block; font-size:12px; font-weight:700; color:var(--muted); margin-bottom:6px; }
+.input,.textarea,select{ width:100%; font-size:15px; font-weight:600; color:var(--ink);
+  background:var(--bg); border:1.5px solid transparent; border-radius:12px; padding:12px 13px;
+  transition:border-color .15s, background .15s; }
+.input:focus,.textarea:focus,select:focus{ outline:none; border-color:var(--green); background:var(--surface); }
+.textarea{ min-height:70px; resize:vertical; line-height:1.6; }
+.row2{ display:flex; gap:10px; } .row2 > *{ flex:1; }
+.calpick{ display:flex; flex-wrap:wrap; gap:8px; }
+.calpick-btn{ display:inline-flex; align-items:center; gap:7px; padding:9px 14px; border-radius:999px;
+  font-size:13px; font-weight:700; background:var(--bg); color:var(--muted); border:1.5px solid transparent;
+  transition:all .14s; }
+.calpick-btn .dot{ width:11px; height:11px; border-radius:50%; }
+.calpick-btn.sel{ color:#fff; }
+.toggle{ display:flex; align-items:center; justify-content:space-between; background:var(--bg);
+  border-radius:12px; padding:11px 14px; }
+.toggle label{ font-size:14px; font-weight:700; }
+.switch{ width:48px; height:28px; border-radius:99px; background:#CFD8D5; position:relative;
+  transition:background .2s; flex:0 0 auto; }
+.switch::after{ content:""; position:absolute; top:3px; left:3px; width:22px; height:22px; border-radius:50%;
+  background:#fff; box-shadow:var(--shadow-sm); transition:transform .2s; }
+.switch.on{ background:var(--green); } .switch.on::after{ transform:translateX(20px); }
+.actions{ display:flex; gap:10px; margin-top:20px; }
+.btn{ flex:1; padding:14px; border-radius:14px; font-size:15px; font-weight:800; transition:transform .1s, filter .12s; }
+.btn:active{ transform:scale(.97); }
+.btn-primary{ background:linear-gradient(150deg,var(--green),var(--green-deep)); color:#fff; box-shadow:var(--shadow-fab); }
+.btn-ghost{ background:var(--bg); color:var(--muted); flex:0 0 auto; padding-inline:20px; }
+.btn-danger{ background:#FDECEB; color:var(--sun); flex:0 0 auto; padding-inline:20px; }
+
+.day-head{ display:flex; align-items:baseline; gap:10px; margin:2px 0 4px; }
+.day-head .d{ font-size:26px; font-weight:800; } .day-head .w{ font-size:13px; font-weight:700; color:var(--muted); }
+.day-list{ margin:12px 0 4px; display:flex; flex-direction:column; gap:8px; }
+.day-item{ display:flex; align-items:center; gap:12px; width:100%; text-align:left; background:var(--bg);
+  border-radius:14px; padding:12px 14px; transition:transform .1s; }
+.day-item:active{ transform:scale(.98); }
+.day-item .bar{ width:5px; align-self:stretch; border-radius:99px; flex:0 0 auto; min-height:34px; }
+.day-item .di-title{ font-size:15px; font-weight:700; }
+.day-item .di-meta{ font-size:12px; font-weight:600; color:var(--muted); margin-top:2px; }
+.day-empty{ text-align:center; color:var(--muted); font-size:14px; font-weight:600; padding:26px 0; }
+.day-empty .em{ font-size:30px; display:block; margin-bottom:8px; opacity:.6; }
+
+/* ---- 機材予約 紐付け ---- */
+.reslist{ display:flex; flex-direction:column; gap:8px; }
+.resitem{ display:flex; align-items:center; gap:10px; background:var(--bg); border-radius:12px; padding:10px 12px; }
+.resitem .ri-main{ flex:1; min-width:0; }
+.resitem .ri-title{ font-size:13.5px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.resitem .ri-meta{ font-size:11.5px; font-weight:600; color:var(--muted); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ri-badge{ font-size:10px; font-weight:800; padding:3px 9px; border-radius:99px; background:var(--green-tint); color:var(--green-deep); flex:0 0 auto; }
+.ri-badge.manual{ background:#EDEBFB; color:#6C5CD6; }
+.res-toggle{ font-size:12px; font-weight:700; color:var(--muted); background:var(--surface); border:1px solid var(--line);
+  border-radius:999px; padding:6px 12px; flex:0 0 auto; transition:transform .1s; }
+.res-toggle:active{ transform:scale(.94); }
+.res-empty{ font-size:12.5px; color:var(--muted); font-weight:600; padding:4px 2px 2px; }
+.res-add-toggle{ font-size:12.5px; font-weight:700; color:var(--green-deep); padding:8px 2px 2px; }
+.reslink-picker{ max-height:220px; overflow-y:auto; display:flex; flex-direction:column; gap:6px; margin-top:8px;
+  border-top:1px dashed var(--line); padding-top:10px; }
+.res-hint{ font-size:12px; color:var(--muted); font-weight:600; padding:10px 2px; line-height:1.6; }
+
+.toast{ position:fixed; left:50%; bottom:calc(env(safe-area-inset-bottom) + 100px);
+  transform:translate(-50%,20px); z-index:120; background:var(--ink); color:#fff; font-size:13.5px;
+  font-weight:700; padding:12px 20px; border-radius:999px; box-shadow:var(--shadow-md);
+  opacity:0; pointer-events:none; transition:opacity .2s, transform .2s; }
+.toast.show{ opacity:1; transform:translate(-50%,0); }
+
+/* ===== ログイン ===== */
+.login{ position:fixed; inset:0; z-index:100; background:var(--bg); display:flex;
+  align-items:center; justify-content:center; padding:24px; transition:opacity .3s; }
+.login.hidden{ opacity:0; pointer-events:none; }
+.login-card{ width:100%; max-width:360px; text-align:center; }
+.login-mark{ width:64px; height:64px; border-radius:20px; margin:0 auto 16px;
+  background:linear-gradient(150deg,var(--green),var(--green-deep)); display:grid; place-items:center;
+  box-shadow:var(--shadow-fab); }
+.login h1{ font-size:24px; font-weight:800; margin:0 0 4px; letter-spacing:.02em; }
+.login p{ font-size:13px; color:var(--muted); font-weight:600; margin:0 0 26px; }
+.login .input{ text-align:center; margin-bottom:10px; }
+.login .err{ color:var(--sun); font-size:13px; font-weight:700; min-height:20px; margin:2px 0 8px; }
+.boot{ color:var(--muted); font-size:13px; font-weight:600; }
+
+@media (prefers-reduced-motion: reduce){ *{ transition:none !important; } }
+@media (max-width:560px){
+  .cell{ min-height:82px; border-radius:10px; padding:5px 3px 4px; }
+  .ev{ font-size:10px; padding:2px 5px; border-radius:6px; }
+  .monthnav .title{ font-size:20px; }
+  .weekhead{ top:calc(env(safe-area-inset-top) + 148px); }
+}
+@media (min-width:720px){ .cell{ min-height:120px; } }
+</style>
+</head>
+<body>
+
+<!-- ===== ログイン画面 ===== -->
+<div class="login" id="loginScreen">
+  <div class="login-card">
+    <div class="login-mark">
+      <svg width="34" height="34" viewBox="0 0 24 24" fill="none">
+        <path d="M12 3C9 3 7 5.2 7 7.8c-1.7.4-3 1.9-3 3.8 0 2.2 1.8 4 4 4h3v3.4c0 .6.4 1 1 1s1-.4 1-1V19.4h3c2.2 0 4-1.8 4-4 0-1.9-1.3-3.4-3-3.8C17 5.2 15 3 12 3Z" fill="#fff"/>
+      </svg>
+    </div>
+    <h1>TeamCal</h1>
+    <p>チームで使う共有カレンダー</p>
+    <div id="loginBody" style="display:none">
+      <input class="input" id="loginName" type="text" placeholder="お名前（任意）" autocomplete="off">
+      <input class="input" id="loginPw" type="password" placeholder="パスワード" autocomplete="current-password">
+      <div class="err" id="loginErr"></div>
+      <button class="btn btn-primary" id="loginBtn" style="width:100%">ログイン</button>
+    </div>
+    <div class="boot" id="loginBoot">接続中…</div>
+  </div>
+</div>
+
+<!-- ===== アプリ ===== -->
+<div class="app" id="app" style="display:none">
+  <header class="appbar">
+    <div class="appbar-top">
+      <div class="brand">
+        <span class="mark" aria-hidden="true">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+            <path d="M12 3C9 3 7 5.2 7 7.8c-1.7.4-3 1.9-3 3.8 0 2.2 1.8 4 4 4h3v3.4c0 .6.4 1 1 1s1-.4 1-1V19.4h3c2.2 0 4-1.8 4-4 0-1.9-1.3-3.4-3-3.8C17 5.2 15 3 12 3Z" fill="#fff"/>
+          </svg>
+        </span>
+        <span class="name">TeamCal<span class="conn" id="connDot" title="接続状態"></span></span>
+      </div>
+      <button class="today-btn" id="todayBtn">今日</button>
+      <button class="icon-btn" id="userBtn" aria-label="アカウント">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.6" stroke="currentColor" stroke-width="2"/><path d="M5 20c0-3.3 3.1-5.5 7-5.5s7 2.2 7 5.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div class="monthnav">
+      <div class="title"><span id="mTitle">—</span><span class="yr" id="mYear"></span></div>
+      <div class="spacer"></div>
+      <button class="nav-arrow" id="prevBtn" aria-label="前の月">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <button class="nav-arrow" id="nextBtn" aria-label="次の月">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    </div>
+    <div class="filters" id="filters"></div>
+  </header>
+
+  <div class="weekhead">
+    <div class="sun">日</div><div>月</div><div>火</div><div>水</div><div>木</div><div>金</div><div class="sat">土</div>
+  </div>
+  <div class="grid" id="grid"></div>
+</div>
+
+<button class="fab" id="fab" aria-label="予定を追加" style="display:none">
+  <svg width="26" height="26" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/></svg>
+</button>
+
+<!-- 予定エディタ -->
+<div class="scrim" id="editScrim">
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="予定の編集">
+    <div class="grabber"></div>
+    <h2 id="editTitle">予定を追加</h2>
+    <div class="res-hint" id="syncNotice" style="display:none;background:var(--green-tint);color:var(--green-deep);border-radius:12px;padding:10px 12px;margin-bottom:14px;">
+      🔗 この予定は kizai-kanri（機材予約）と連携しています。内容の変更は kizai-kanri 側で行ってください。
+    </div>
+
+    <div class="field"><label>タイトル</label>
+      <input class="input" id="fTitle" placeholder="例）〇〇様 撮影 / 定例MTG" autocomplete="off"></div>
+
+    <div class="field"><label>カレンダー</label><div class="calpick" id="calpick"></div></div>
+
+    <div class="field row2">
+      <div><label>ラベル（案件・客先など）</label>
+        <input class="input" id="fLabel" placeholder="例）雪印メグミルク様" autocomplete="off"></div>
+      <div><label>担当者</label>
+        <input class="input" id="fAssignee" placeholder="例）平島" autocomplete="off" list="assigneeList"></div>
+    </div>
+    <datalist id="assigneeList"></datalist>
+
+    <div class="field"><div class="toggle"><label for="fAllday">終日</label>
+      <button class="switch" id="fAllday" role="switch" aria-checked="false" aria-label="終日"></button></div></div>
+
+    <div class="field row2">
+      <div><label>開始日</label><input class="input" id="fStartDate" type="date"></div>
+      <div id="startTimeWrap"><label>開始時刻</label><input class="input" id="fStartTime" type="time" step="300"></div>
+    </div>
+    <div class="field row2">
+      <div><label>終了日</label><input class="input" id="fEndDate" type="date"></div>
+      <div id="endTimeWrap"><label>終了時刻</label><input class="input" id="fEndTime" type="time" step="300"></div>
+    </div>
+
+    <div class="field"><label>場所</label>
+      <input class="input" id="fLoc" placeholder="例）スタジオA / 現地集合" autocomplete="off"></div>
+
+    <div class="field"><label>リマインダー</label>
+      <select class="input" id="fReminder">
+        <option value="">なし</option>
+        <option value="5">5分前</option>
+        <option value="10">10分前</option>
+        <option value="30">30分前</option>
+        <option value="60">1時間前</option>
+        <option value="1440">1日前</option>
+      </select>
+    </div>
+
+    <div class="field"><label>メモ</label>
+      <textarea class="textarea" id="fMemo" placeholder="持ち物・共有事項など"></textarea></div>
+
+    <h3 id="resSectionTitle" style="display:none">関連する機材予約</h3>
+    <div id="resSection" style="display:none">
+      <div class="reslist" id="resShownList"></div>
+      <div class="res-empty" id="resEmptyMsg" style="display:none">重なる機材予約は見つかりませんでした</div>
+      <button class="res-add-toggle" id="resAddToggle">＋ 他の予約を紐付ける</button>
+      <div class="reslink-picker" id="resPicker" style="display:none"></div>
+    </div>
+    <div class="res-hint" id="resNewHint">保存すると、期間が重なる機材予約をここに自動表示できます。</div>
+
+    <div class="actions">
+      <button class="btn btn-ghost" id="editCancel">閉じる</button>
+      <button class="btn btn-danger" id="editDelete" style="display:none">削除</button>
+      <button class="btn btn-primary" id="editSave">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- デイシート -->
+<div class="scrim" id="dayScrim">
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="その日の予定">
+    <div class="grabber"></div>
+    <div class="day-head"><span class="d" id="daySheetD"></span><span class="w" id="daySheetW"></span></div>
+    <div class="day-list" id="dayList"></div>
+    <div class="actions">
+      <button class="btn btn-ghost" id="dayClose">閉じる</button>
+      <button class="btn btn-primary" id="dayAdd">＋ 予定を追加</button>
+    </div>
+  </div>
+</div>
+
+<!-- 確認 -->
+<div class="scrim center" id="confirmScrim">
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="確認">
+    <div class="grabber"></div>
+    <h2 id="confirmMsg">削除しますか？</h2>
+    <div class="actions">
+      <button class="btn btn-ghost" id="confirmNo">やめる</button>
+      <button class="btn btn-danger" id="confirmYes" style="flex:1">削除する</button>
+    </div>
+  </div>
+</div>
+
+<!-- アカウント -->
+<div class="scrim center" id="userScrim">
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="アカウント">
+    <div class="grabber"></div>
+    <h2>アカウント</h2>
+    <div class="field"><label>表示名（この端末）</label>
+      <input class="input" id="userName" placeholder="お名前" autocomplete="off"></div>
+    <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:4px">権限：<span id="userRole">—</span></div>
+    <div class="actions">
+      <button class="btn btn-ghost" id="userClose">閉じる</button>
+      <button class="btn btn-danger" id="logoutBtn">ログアウト</button>
+      <button class="btn btn-primary" id="userSave">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script type="module">
+/* ============================================================
+   TeamCal Phase 3 — 予定項目拡張 ＋ 機材予約紐付け
+   BUILD 2026-07-13d
+   ============================================================ */
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getDatabase, ref, onValue, push, update, remove, get }
+  from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+import { getAuth, signInAnonymously }
+  from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+const APP_VERSION = "2026-07-13e";
+
+/* ---- kizai-kanri と同じ Firebase プロジェクト ---- */
+const firebaseConfig = {
+  apiKey: "AIzaSyDuaqODebI3w3EciiksFmZlJrC9WQUmuZc",
+  authDomain: "kizai-kanri-cab2a.firebaseapp.com",
+  databaseURL: "https://kizai-kanri-cab2a-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "kizai-kanri-cab2a",
+  storageBucket: "kizai-kanri-cab2a.firebasestorage.app",
+  messagingSenderId: "559998500740",
+  appId: "1:559998500740:web:92540bee4834c5011367d1"
+};
+const fbApp = initializeApp(firebaseConfig);
+const db = getDatabase(fbApp);
+const fbAuth = getAuth(fbApp);
+
+const WD = ["日","月","火","水","木","金","土"];
+const DEFAULT_CALS = [
+  { id:"work",    name:"撮影・案件", color:"#F0625D", order:0 },
+  { id:"office",  name:"社内",       color:"#3A9BE8", order:1 },
+  { id:"private", name:"個人",       color:"#7C6FE0", order:2 }
+];
+const REMINDER_LABEL = {5:"5分前",10:"10分前",30:"30分前",60:"1時間前",1440:"1日前"};
+
+/* ---- ローカル保存（個人設定：認証・フィルタ表示） ---- */
+const store = (() => {
+  let ok=true; try{ localStorage.setItem("__t","1"); localStorage.removeItem("__t"); }catch(e){ ok=false; }
+  const mem={};
+  return {
+    get(k,def){ try{ const v=ok?localStorage.getItem(k):mem[k]; return v?JSON.parse(v):def; }catch(e){ return def; } },
+    set(k,v){ const s=JSON.stringify(v); try{ ok?localStorage.setItem(k,s):(mem[k]=s); }catch(e){ mem[k]=s; } },
+    del(k){ try{ ok?localStorage.removeItem(k):delete mem[k]; }catch(e){} }
+  };
+})();
+
+/* ---- 状態 ---- */
+const now = new Date();
+let viewY = now.getFullYear();
+let viewM = now.getMonth();
+let cals = [];
+let events = [];
+let reservations = [];      // eqmgr_data/reservations（読み取り専用）
+let hidden = new Set(store.get("teamcal_hidden_v1", []));
+let auth = store.get("teamcal_auth_v1", null);
+let editingId = null;
+let editorReadonly = false;
+let draft = {};
+let daySheetDate = null;
+let listenersStarted = false;
+let pwCache = {};
+let resPickerOpen = false;
+
+/* ---- ユーティリティ ---- */
+const $ = id => document.getElementById(id);
+function pad(n){ return String(n).padStart(2,"0"); }
+function ymd(y,m,d){ return `${y}-${pad(m+1)}-${pad(d)}`; }
+function calOf(id){ return cals.find(c=>c.id===id) || cals[0] || {color:"#8A98A5",name:"—"}; }
+function escapeHtml(s){ return (s||"").replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
+function saveHidden(){ store.set("teamcal_hidden_v1",[...hidden]); }
+
+/* 予定の終了日（未設定なら開始日と同じ扱い） */
+function evEnd(e){ return e.endDate || e.startDate; }
+/* 期間重複判定（文字列 yyyy-mm-dd は辞書式比較でOK） */
+function overlaps(aS,aE,bS,bE){ return aS<=bE && bS<=aE; }
+
+function eventsOn(dateStr){
+  return events.filter(e=> !hidden.has(e.calId) && e.startDate<=dateStr && dateStr<=evEnd(e))
+    .sort((a,b)=>{
+      const aSpan = a.startDate!==evEnd(a), bSpan = b.startDate!==evEnd(b);
+      if(aSpan!==bSpan) return aSpan? -1:1;
+      if(a.allDay!==b.allDay) return a.allDay?-1:1;
+      return (a.startTime||"").localeCompare(b.startTime||"");
+    });
+}
+
+/* ============================================================
+   ログイン
+   ============================================================ */
+async function boot(){
+  try{
+    await signInAnonymously(fbAuth);
+    const snap = await get(ref(db,"eqmgr_passwords"));
+    pwCache = snap.val() || {};
+    $("loginBoot").style.display = "none";
+    if(auth && auth.role){ enterApp(); }
+    else { $("loginBody").style.display = "block"; setTimeout(()=>$("loginPw").focus(),100); }
+  }catch(e){
+    const msg = (e && e.code === "auth/operation-not-allowed")
+      ? "匿名認証が無効です。Firebase の Authentication →「匿名」を有効にしてください。"
+      : "接続に失敗しました。通信環境を確認して再読み込みしてください。";
+    $("loginBoot").textContent = msg;
+    console.error(e);
+  }
+}
+function tryLogin(){
+  const pw = $("loginPw").value;
+  const name = $("loginName").value.trim();
+  let role = null;
+  if(pw && pw === pwCache.admin) role = "admin";
+  else if(pw && pw === pwCache.user) role = "member";
+  if(!role){ $("loginErr").textContent = "パスワードが違います"; return; }
+  auth = { role, name: name || (role==="admin" ? "管理者" : "メンバー") };
+  store.set("teamcal_auth_v1", auth);
+  enterApp();
+}
+function enterApp(){
+  $("loginScreen").classList.add("hidden");
+  $("app").style.display = "flex";
+  $("fab").style.display = "grid";
+  startListeners();
+}
+function logout(){ store.del("teamcal_auth_v1"); auth = null; location.reload(); }
+
+/* ============================================================
+   Firebase リスナー
+   ============================================================ */
+function startListeners(){
+  if(listenersStarted) return; listenersStarted = true;
+
+  onValue(ref(db,".info/connected"), s=>{ $("connDot").classList.toggle("on", s.val()===true); });
+
+  onValue(ref(db,"teamcal/calendars"), snap=>{
+    const v = snap.val();
+    if(!v){ seedCalendars(); return; }
+    cals = Object.entries(v).map(([id,c])=>({id,...c})).sort((a,b)=>(a.order||0)-(b.order||0));
+    renderFilters(); renderGrid();
+  });
+
+  onValue(ref(db,"teamcal/events"), snap=>{
+    const v = snap.val() || {};
+    events = Object.entries(v).map(([id,e])=> migrateEvent(id,e));
+    renderGrid();
+    if($("dayScrim").classList.contains("show") && daySheetDate) fillDaySheet(daySheetDate);
+    if($("editScrim").classList.contains("show") && editingId) renderResSection();
+  });
+
+  // 機材予約は読み取り専用（eqmgr_* には一切書き込まない）
+  onValue(ref(db,"eqmgr_data/reservations"), snap=>{
+    const v = snap.val() || {};
+    reservations = Object.entries(v).map(([id,r])=>({id,...r}));
+    renderAssigneeList();
+    if($("editScrim").classList.contains("show") && editingId) renderResSection();
+    if($("dayScrim").classList.contains("show") && daySheetDate) fillDaySheet(daySheetDate);
+  });
+}
+function seedCalendars(){
+  const updates = {};
+  DEFAULT_CALS.forEach(c=> updates["teamcal/calendars/"+c.id] = {name:c.name,color:c.color,order:c.order});
+  update(ref(db), updates);
+}
+/* 旧フォーマット(date/start/end)からの自動移行（表示用。保存時に新形式で書き戻る） */
+function migrateEvent(id, e){
+  if(e.startDate) return { id, ...e };
+  return { id, ...e, startDate: e.date, endDate: e.date, startTime: e.start||"", endTime: e.end||"" };
+}
+
+/* ============================================================
+   描画：月グリッド
+   ============================================================ */
+function renderFilters(){
+  const wrap = $("filters"); wrap.innerHTML = "";
+  cals.forEach(c=>{
+    const b = document.createElement("button");
+    b.className = "chip" + (hidden.has(c.id)?" off":"");
+    b.innerHTML = `<span class="dot" style="background:${c.color}"></span>${escapeHtml(c.name)}`;
+    b.onclick = ()=>{ hidden.has(c.id)?hidden.delete(c.id):hidden.add(c.id); saveHidden(); renderFilters(); renderGrid(); };
+    wrap.appendChild(b);
+  });
+}
+function renderGrid(){
+  $("mTitle").textContent = (viewM+1)+"月";
+  $("mYear").textContent = viewY;
+  const grid = $("grid"); grid.innerHTML = "";
+  const first = new Date(viewY, viewM, 1);
+  const start = new Date(viewY, viewM, 1 - first.getDay());
+  const todayStr = ymd(now.getFullYear(), now.getMonth(), now.getDate());
+  const maxChips = window.innerWidth < 560 ? 3 : 4;
+
+  for(let i=0;i<42;i++){
+    const dt = new Date(start.getFullYear(), start.getMonth(), start.getDate()+i);
+    const y=dt.getFullYear(), m=dt.getMonth(), d=dt.getDate();
+    const dateStr = ymd(y,m,d), dow = dt.getDay(), outMonth = (m!==viewM);
+    const cell = document.createElement("button");
+    cell.className = "cell" + (outMonth?" out":"") + (dateStr===todayStr?" today":"");
+    cell.onclick = ()=> openDaySheet(dateStr);
+    const num = document.createElement("div");
+    num.className = "num" + (dow===0?" sun":"") + (dow===6?" sat":"");
+    num.textContent = d; cell.appendChild(num);
+
+    const list = eventsOn(dateStr);
+    list.slice(0,maxChips).forEach(e=>{
+      const c = calOf(e.calId);
+      const isSpan = e.startDate !== evEnd(e);
+      const chip = document.createElement("div");
+      if(e.allDay || isSpan){
+        chip.className = "ev span" + (isSpan && dateStr!==e.startDate? " cont-l":"") + (isSpan && dateStr!==evEnd(e)? " cont-r":"");
+        chip.style.background = c.color;
+        chip.innerHTML = `<span class="t">${escapeHtml(e.title)}</span>`;
+      }else{
+        chip.className = "ev timed";
+        chip.innerHTML = `<span class="bar" style="background:${c.color}"></span>`+
+          `<span class="hm">${e.startTime||""}</span><span class="t">${escapeHtml(e.title)}</span>`;
+      }
+      chip.onclick = ev=>{ ev.stopPropagation(); openEditor(e, dateStr); };
+      cell.appendChild(chip);
+    });
+    if(list.length>maxChips){
+      const more = document.createElement("div"); more.className="more";
+      more.textContent = `他 ${list.length-maxChips} 件`; cell.appendChild(more);
+    }
+    grid.appendChild(cell);
+  }
+}
+
+/* ---- デイシート ---- */
+function openDaySheet(dateStr){ daySheetDate = dateStr; fillDaySheet(dateStr); openScrim("dayScrim"); }
+function fillDaySheet(dateStr){
+  const [y,m,d] = dateStr.split("-").map(Number);
+  const dt = new Date(y,m-1,d);
+  $("daySheetD").textContent = `${m}月${d}日`;
+  $("daySheetW").textContent = `（${WD[dt.getDay()]}）`;
+  const list = eventsOn(dateStr); const box = $("dayList"); box.innerHTML = "";
+  if(list.length===0){
+    box.innerHTML = `<div class="day-empty"><span class="em">🗓️</span>予定はありません<br>下のボタンから追加できます</div>`;
+  }else{
+    list.forEach(e=>{
+      const c = calOf(e.calId);
+      const span = e.startDate!==evEnd(e) ? `${e.startDate.slice(5)}〜${evEnd(e).slice(5)}` : "";
+      const meta = [
+        e.allDay ? "終日" : (span ? "" : `${e.startTime||""}${e.endTime?" - "+e.endTime:""}`),
+        span, e.label, e.assignee, e.loc
+      ].filter(Boolean).join(" ・ ");
+      const it = document.createElement("button"); it.className="day-item";
+      it.innerHTML = `<span class="bar" style="background:${c.color}"></span>`+
+        `<span style="flex:1"><span class="di-title">${e.sourceReservationId?"🔗 ":""}${escapeHtml(e.title)}</span>`+
+        `<span class="di-meta">${escapeHtml(meta)}</span></span>`;
+      it.onclick = ()=>{ closeScrim("dayScrim"); openEditor(e, dateStr); };
+      box.appendChild(it);
+    });
+  }
+}
+
+/* ============================================================
+   機材予約：自動マッチ ＋ 手動紐付け
+   ============================================================ */
+function autoMatches(ev){
+  const s = ev.startDate, e = evEnd(ev);
+  if(!s) return [];
+  return reservations
+    .filter(r => r.startDate && overlaps(s, e, r.startDate, r.endDate||r.startDate))
+    .sort((a,b)=>{
+      const am = (ev.assignee && a.userName && a.userName.includes(ev.assignee)) ? 0 : 1;
+      const bm = (ev.assignee && b.userName && b.userName.includes(ev.assignee)) ? 0 : 1;
+      if(am!==bm) return am-bm;
+      return (a.startDate||"").localeCompare(b.startDate||"");
+    });
+}
+function shownReservations(ev){
+  const auto = autoMatches(ev);
+  const excluded = ev.resExcluded || {};
+  const included = ev.resIncluded || {};
+  const shown = auto.filter(r=>!excluded[r.id]).map(r=>({...r, manual:false}));
+  Object.keys(included).forEach(id=>{
+    if(!shown.find(r=>r.id===id)){
+      const r = reservations.find(x=>x.id===id);
+      if(r) shown.push({...r, manual:true});
+    }
+  });
+  return { shown, auto };
+}
+function resMeta(r){
+  return [r.startDate + (r.endDate&&r.endDate!==r.startDate? "〜"+r.endDate:""), r.userName, r.useLocation].filter(Boolean).join(" ・ ");
+}
+function renderResSection(){
+  if(!editingId){
+    $("resSectionTitle").style.display="none"; $("resSection").style.display="none";
+    $("resNewHint").style.display="block";
+    return;
+  }
+  $("resNewHint").style.display="none";
+  $("resSectionTitle").style.display="block"; $("resSection").style.display="block";
+
+  const ev = events.find(e=>e.id===editingId) || draft;
+
+  /* kizai-kanriから直接反映された予定は、その案件(projectGroupId)の予約だけを
+     読み取り専用で表示する（外す/追加はさせない。編集はkizai-kanri側で行う） */
+  if(ev.sourceReservationId){
+    $("resSectionTitle").textContent = "紐付けられた機材予約（kizai-kanri連携）";
+    $("resAddToggle").style.display = "none";
+    $("resPicker").style.display = "none";
+    const list = reservations.filter(r=>r.projectGroupId===ev.sourceReservationId);
+    const wrap = $("resShownList"); wrap.innerHTML = "";
+    $("resEmptyMsg").style.display = list.length===0 ? "block":"none";
+    list.forEach(r=>{
+      const row = document.createElement("div"); row.className="resitem";
+      row.innerHTML = `<span class="ri-badge">連携</span>`+
+        `<span class="ri-main"><span class="ri-title">${escapeHtml(r.equipmentName||"機材")}</span>`+
+        `<span class="ri-meta">${escapeHtml(r.projectName||"")} ・ ${escapeHtml(resMeta(r))}</span></span>`;
+      wrap.appendChild(row);
+    });
+    return;
+  }
+  $("resSectionTitle").textContent = "関連する機材予約";
+  $("resAddToggle").style.display = "block";
+
+  const { shown, auto } = shownReservations(ev);
+  const wrap = $("resShownList"); wrap.innerHTML = "";
+  $("resEmptyMsg").style.display = shown.length===0 ? "block":"none";
+
+  shown.forEach(r=>{
+    const isAuto = auto.some(a=>a.id===r.id) && !r.manual;
+    const row = document.createElement("div"); row.className="resitem";
+    row.innerHTML = `<span class="ri-badge${r.manual?" manual":""}">${r.manual?"手動":"自動"}</span>`+
+      `<span class="ri-main"><span class="ri-title">${escapeHtml(r.equipmentName||"機材")}</span>`+
+      `<span class="ri-meta">${escapeHtml(r.projectName||"")} ・ ${escapeHtml(resMeta(r))}</span></span>`+
+      `<button class="res-toggle" data-id="${r.id}">外す</button>`;
+    row.querySelector(".res-toggle").onclick = ()=> unlinkReservation(ev.id, r.id, r.manual);
+    wrap.appendChild(row);
+  });
+
+  const picker = $("resPicker");
+  if(resPickerOpen){
+    picker.style.display = "flex";
+    const shownIds = new Set(shown.map(r=>r.id));
+    const candidates = reservations.filter(r=>!shownIds.has(r.id))
+      .sort((a,b)=>(b.startDate||"").localeCompare(a.startDate||"")).slice(0,40);
+    picker.innerHTML = "";
+    if(candidates.length===0){
+      picker.innerHTML = `<div class="res-empty">紐付けられる予約がありません</div>`;
+    }
+    candidates.forEach(r=>{
+      const row = document.createElement("div"); row.className="resitem";
+      row.innerHTML = `<span class="ri-main"><span class="ri-title">${escapeHtml(r.equipmentName||"機材")}</span>`+
+        `<span class="ri-meta">${escapeHtml(r.projectName||"")} ・ ${escapeHtml(resMeta(r))}</span></span>`+
+        `<button class="res-toggle" data-id="${r.id}">＋紐付け</button>`;
+      row.querySelector(".res-toggle").onclick = ()=> linkReservation(ev.id, r.id);
+      picker.appendChild(row);
+    });
+    $("resAddToggle").textContent = "▲ 閉じる";
+  }else{
+    picker.style.display = "none";
+    $("resAddToggle").textContent = "＋ 他の予約を紐付ける";
+  }
+}
+function linkReservation(eventId, resId){
+  update(ref(db, `teamcal/events/${eventId}/resIncluded`), { [resId]: true });
+  // 自動除外に入っていた場合は解除
+  remove(ref(db, `teamcal/events/${eventId}/resExcluded/${resId}`)).catch(()=>{});
+}
+function unlinkReservation(eventId, resId, isManual){
+  if(isManual){
+    remove(ref(db, `teamcal/events/${eventId}/resIncluded/${resId}`));
+  }else{
+    update(ref(db, `teamcal/events/${eventId}/resExcluded`), { [resId]: true });
+  }
+}
+function renderAssigneeList(){
+  const names = [...new Set(reservations.map(r=>r.userName).filter(Boolean))];
+  $("assigneeList").innerHTML = names.map(n=>`<option value="${escapeHtml(n)}">`).join("");
+}
+
+/* ============================================================
+   エディタ
+   ============================================================ */
+function openEditor(ev, presetDate){
+  editingId = ev ? ev.id : null;
+  resPickerOpen = false;
+  const isSynced = !!(ev && ev.sourceReservationId);
+  editorReadonly = isSynced;
+  $("editTitle").textContent = ev ? (isSynced? "予定を確認（機材予約と連携）" : "予定を編集") : "予定を追加";
+  $("editDelete").style.display = (ev && !isSynced) ? "block" : "none";
+  $("editSave").style.display = isSynced ? "none" : "block";
+  const today = ymd(now.getFullYear(),now.getMonth(),now.getDate());
+  draft = ev ? {...ev} : { calId:(cals[0]&&cals[0].id)||"work", title:"", allDay:false,
+    startDate: presetDate || today, endDate: presetDate || today,
+    startTime:"10:00", endTime:"11:00", label:"", assignee:"", loc:"", memo:"", reminder:"" };
+
+  $("fTitle").value    = draft.title || "";
+  $("fLabel").value    = draft.label || "";
+  $("fAssignee").value = draft.assignee || "";
+  $("fStartDate").value = draft.startDate;
+  $("fEndDate").value   = draft.endDate || draft.startDate;
+  $("fStartTime").value = draft.startTime || "10:00";
+  $("fEndTime").value   = draft.endTime   || "11:00";
+  $("fLoc").value  = draft.loc  || "";
+  $("fMemo").value = draft.memo || "";
+  $("fReminder").value = draft.reminder || "";
+  setAllday(!!draft.allDay);
+
+  ["fTitle","fLabel","fAssignee","fStartDate","fEndDate","fStartTime","fEndTime","fLoc","fMemo","fReminder","fAllday"]
+    .forEach(id=>{ const el=$(id); if(el) el.disabled = isSynced; });
+  $("syncNotice").style.display = isSynced ? "block" : "none";
+
+  renderCalPick();
+  renderResSection();
+  openScrim("editScrim");
+  if(!isSynced) setTimeout(()=>$("fTitle").focus(),260);
+}
+function renderCalPick(){
+  const wrap = $("calpick"); wrap.innerHTML = "";
+  cals.forEach(c=>{
+    const sel = c.id===draft.calId;
+    const b = document.createElement("button");
+    b.className = "calpick-btn" + (sel?" sel":""); if(sel){ b.style.background=c.color; }
+    b.innerHTML = `<span class="dot" style="background:${sel?'#fff':c.color}"></span>${escapeHtml(c.name)}`;
+    b.onclick = ()=>{ if(editorReadonly) return; draft.calId=c.id; renderCalPick(); };
+    wrap.appendChild(b);
+  });
+}
+function setAllday(on){
+  draft.allDay = on;
+  const sw = $("fAllday"); sw.classList.toggle("on",on); sw.setAttribute("aria-checked",on);
+  $("startTimeWrap").style.display = on ? "none" : "block";
+  $("endTimeWrap").style.display   = on ? "none" : "block";
+}
+function saveFromEditor(){
+  const title = $("fTitle").value.trim();
+  if(!title){ toast("タイトルを入力してください"); $("fTitle").focus(); return; }
+  const sDate = $("fStartDate").value;
+  let eDate = $("fEndDate").value || sDate;
+  if(eDate < sDate) eDate = sDate;
+  const data = {
+    calId: draft.calId, title,
+    label: $("fLabel").value.trim(),
+    assignee: $("fAssignee").value.trim(),
+    allDay: draft.allDay,
+    startDate: sDate, endDate: eDate,
+    startTime: draft.allDay ? "" : $("fStartTime").value,
+    endTime:   draft.allDay ? "" : $("fEndTime").value,
+    loc:  $("fLoc").value.trim(),
+    memo: $("fMemo").value.trim(),
+    reminder: $("fReminder").value,
+    updatedBy: (auth&&auth.name)||"", updatedAt: Date.now()
+  };
+  if(editingId){
+    update(ref(db,"teamcal/events/"+editingId), data); toast("予定を更新しました");
+  }else{
+    push(ref(db,"teamcal/events"), data); toast("予定を追加しました");
+  }
+  closeScrim("editScrim");
+}
+function deleteEvent(){
+  const id = editingId;
+  openConfirm("この予定を削除しますか？", ()=>{ remove(ref(db,"teamcal/events/"+id)); closeScrim("editScrim"); toast("削除しました"); });
+}
+
+/* ---- 確認 ---- */
+let confirmCb = null;
+function openConfirm(msg,cb){ $("confirmMsg").textContent = msg; confirmCb = cb; openScrim("confirmScrim"); }
+
+/* ---- scrim / toast ---- */
+function openScrim(id){ $(id).classList.add("show"); }
+function closeScrim(id){ $(id).classList.remove("show"); }
+let toastT=null;
+function toast(msg){ const t=$("toast"); t.textContent=msg; t.classList.add("show");
+  clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove("show"),1900); }
+
+/* ============================================================
+   配線
+   ============================================================ */
+$("loginBtn").onclick = tryLogin;
+$("loginPw").addEventListener("keydown", e=>{ if(e.key==="Enter") tryLogin(); });
+
+$("prevBtn").onclick = ()=>{ viewM--; if(viewM<0){viewM=11;viewY--;} renderGrid(); };
+$("nextBtn").onclick = ()=>{ viewM++; if(viewM>11){viewM=0;viewY++;} renderGrid(); };
+$("todayBtn").onclick = ()=>{ viewY=now.getFullYear(); viewM=now.getMonth(); renderGrid(); };
+$("fab").onclick = ()=> openEditor(null,null);
+
+$("fAllday").onclick = ()=>{ if(editorReadonly) return; setAllday(!draft.allDay); };
+$("fStartDate").addEventListener("change", ()=>{ if($("fEndDate").value < $("fStartDate").value) $("fEndDate").value = $("fStartDate").value; });
+$("editSave").onclick = saveFromEditor;
+$("editDelete").onclick = deleteEvent;
+$("editCancel").onclick = ()=> closeScrim("editScrim");
+$("resAddToggle").onclick = ()=>{ resPickerOpen = !resPickerOpen; renderResSection(); };
+
+$("dayClose").onclick = ()=> closeScrim("dayScrim");
+$("dayAdd").onclick = ()=>{ closeScrim("dayScrim"); openEditor(null, daySheetDate); };
+$("confirmNo").onclick = ()=> closeScrim("confirmScrim");
+$("confirmYes").onclick = ()=>{ closeScrim("confirmScrim"); if(confirmCb) confirmCb(); confirmCb=null; };
+
+$("userBtn").onclick = ()=>{ $("userName").value = (auth&&auth.name)||"";
+  $("userRole").textContent = (auth&&auth.role==="admin")?"管理者":"メンバー"; openScrim("userScrim"); };
+$("userClose").onclick = ()=> closeScrim("userScrim");
+$("userSave").onclick = ()=>{ const n=$("userName").value.trim(); if(auth){ auth.name=n||auth.name; store.set("teamcal_auth_v1",auth);} closeScrim("userScrim"); toast("表示名を保存しました"); };
+$("logoutBtn").onclick = logout;
+
+["editScrim","dayScrim","confirmScrim","userScrim"].forEach(id=>{
+  $(id).addEventListener("click", e=>{ if(e.target.id===id) closeScrim(id); });
+});
+document.addEventListener("keydown", e=>{ if(e.key==="Escape")
+  ["editScrim","dayScrim","confirmScrim","userScrim"].forEach(id=>closeScrim(id)); });
+let rz=null; window.addEventListener("resize", ()=>{ clearTimeout(rz); rz=setTimeout(renderGrid,150); });
+
+console.log("TeamCal build", APP_VERSION);
+boot();
+</script>
+</body>
+</html>
