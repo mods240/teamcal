@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!-- ============================================================
      TeamCal  —  共有カレンダー  Phase 3
-     BUILD 2026-07-13e
+     BUILD 2026-07-13f
      ・予定項目を拡張：ラベル／担当者／開始日時・終了日時（複数日対応）／リマインダー／メモ
      ・機材予約(eqmgr_data/reservations)を読み取り専用で参照し、
        期間重複＋担当者一致で自動紐付け。手動での追加/除外にも対応
@@ -403,7 +403,7 @@ import { getDatabase, ref, onValue, push, update, remove, get }
 import { getAuth, signInAnonymously }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
-const APP_VERSION = "2026-07-13e";
+const APP_VERSION = "2026-07-13f";
 
 /* ---- kizai-kanri と同じ Firebase プロジェクト ---- */
 const firebaseConfig = {
@@ -693,7 +693,14 @@ function renderResSection(){
     $("resSectionTitle").textContent = "紐付けられた機材予約（kizai-kanri連携）";
     $("resAddToggle").style.display = "none";
     $("resPicker").style.display = "none";
-    const list = reservations.filter(r=>r.projectGroupId===ev.sourceReservationId);
+    // 新しい予約は実際のprojectGroupIdで正確に一致。移行済みの古い予約はIDを
+    // 持たないため、利用者・期間・案件名の一致でフォールバック照合する
+    let list = reservations.filter(r=>r.projectGroupId===ev.sourceReservationId);
+    if(list.length===0){
+      list = reservations.filter(r=>
+        r.userName===ev.assignee && r.startDate===ev.startDate && r.endDate===evEnd(ev) &&
+        (r.projectName||"noname")===(ev.label||"noname"));
+    }
     const wrap = $("resShownList"); wrap.innerHTML = "";
     $("resEmptyMsg").style.display = list.length===0 ? "block":"none";
     list.forEach(r=>{
