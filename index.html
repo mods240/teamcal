@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!-- ============================================================
      TeamCal  —  共有カレンダー  Phase 3
-     BUILD 2026-07-20e
+     BUILD 2026-07-20f
      ・予定項目を拡張：ラベル／担当者／開始日時・終了日時（複数日対応）／リマインダー／メモ
      ・機材予約(eqmgr_data/reservations)を読み取り専用で参照し、
        期間重複＋担当者一致で自動紐付け。手動での追加/除外にも対応
@@ -13,7 +13,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>TeamCal</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -29,7 +29,7 @@
   --font:"M PLUS Rounded 1c",-apple-system,BlinkMacSystemFont,"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic","YuGothic","Meiryo",sans-serif;
 }
 *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-html,body{ margin:0; height:100%; }
+html,body{ margin:0; height:100%; overflow-x:hidden; }
 body{ font-family:var(--font); color:var(--ink); background:var(--bg);
   font-feature-settings:"palt" 1; -webkit-font-smoothing:antialiased; overscroll-behavior-y:none; }
 button{ font-family:inherit; cursor:pointer; border:none; background:none; color:inherit; }
@@ -146,7 +146,7 @@ input,select{ font-family:inherit; }
 .sheet h3{ font-size:13px; font-weight:800; color:var(--muted); margin:22px 0 8px; }
 .field{ margin-bottom:14px; }
 .field > label{ display:block; font-size:12px; font-weight:700; color:var(--muted); margin-bottom:6px; }
-.input,.textarea,select{ width:100%; font-size:15px; font-weight:600; color:var(--ink);
+.input,.textarea,select{ width:100%; font-size:16px; font-weight:600; color:var(--ink);
   background:var(--bg); border:1.5px solid transparent; border-radius:12px; padding:12px 13px;
   transition:border-color .15s, background .15s; }
 .input:focus,.textarea:focus,select:focus{ outline:none; border-color:var(--green); background:var(--surface); }
@@ -457,7 +457,7 @@ import { getDatabase, ref, onValue, push, update, remove, get, runTransaction }
 import { getAuth, signInAnonymously }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
-const APP_VERSION = "2026-07-20e";
+const APP_VERSION = "2026-07-20f";
 
 /* ---- kizai-kanri と同じ Firebase プロジェクト ---- */
 const firebaseConfig = {
@@ -1164,7 +1164,15 @@ $("editCancel").onclick = ()=> closeScrim("editScrim");
 $("resAddToggle").onclick = ()=>{ resPickerOpen = !resPickerOpen; renderResSection(); };
 
 $("dayClose").onclick = ()=> closeScrim("dayScrim");
-$("dayAdd").onclick = ()=>{ closeScrim("dayScrim"); openEditor(null, daySheetDate); };
+$("dayAdd").onclick = ()=>{
+  closeScrim("dayScrim");
+  if(viewMode==="vehicle"){
+    openVehResModal();
+    $("vrStart").value = daySheetDate; $("vrEnd").value = daySheetDate;
+  }else{
+    openEditor(null, daySheetDate);
+  }
+};
 $("confirmNo").onclick = ()=> closeScrim("confirmScrim");
 $("confirmYes").onclick = ()=>{ closeScrim("confirmScrim"); if(confirmCb) confirmCb(); confirmCb=null; };
 
