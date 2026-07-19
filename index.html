@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!-- ============================================================
      TeamCal  —  共有カレンダー  Phase 3
-     BUILD 2026-07-20d
+     BUILD 2026-07-20e
      ・予定項目を拡張：ラベル／担当者／開始日時・終了日時（複数日対応）／リマインダー／メモ
      ・機材予約(eqmgr_data/reservations)を読み取り専用で参照し、
        期間重複＋担当者一致で自動紐付け。手動での追加/除外にも対応
@@ -153,6 +153,9 @@ input,select{ font-family:inherit; }
 .textarea{ min-height:70px; resize:vertical; line-height:1.6; }
 .row2{ display:flex; gap:10px; } .row2 > *{ flex:1; }
 .calpick{ display:flex; flex-wrap:wrap; gap:8px; }
+.calpick.accordion{ overflow:hidden; max-height:88px; }
+.calpick.accordion.expanded{ max-height:none; }
+.filters-toggle{ font-size:12px; font-weight:700; color:var(--green-deep); background:none; border:none; padding:2px 0; }
 .calpick-btn{ display:inline-flex; align-items:center; gap:7px; padding:9px 14px; border-radius:999px;
   font-size:13px; font-weight:700; background:var(--bg); color:var(--muted); border:1.5px solid transparent;
   transition:all .14s; }
@@ -311,7 +314,9 @@ input,select{ font-family:inherit; }
     <p class="res-hint" style="margin:0 0 14px;padding:0;">ここで作成すると、機材管理システム（kizai-kanri）の予約としても登録されます。機材管理側は次回読み込み時に反映されます。</p>
 
     <div class="field"><label>車両</label>
-      <select class="input" id="vrVehicle"></select></div>
+      <div class="calpick accordion" id="vrVehiclePick"></div>
+      <button class="filters-toggle" id="vrVehicleToggle" style="display:none;margin-top:6px;">すべて表示 ▾</button>
+    </div>
     <div class="field"><label>案件名</label>
       <input class="input" id="vrProject" placeholder="例）〇〇様 中継" autocomplete="off"></div>
     <div class="field"><label>利用者</label>
@@ -452,7 +457,7 @@ import { getDatabase, ref, onValue, push, update, remove, get, runTransaction }
 import { getAuth, signInAnonymously }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
-const APP_VERSION = "2026-07-20d";
+const APP_VERSION = "2026-07-20e";
 
 /* ---- kizai-kanri と同じ Firebase プロジェクト ---- */
 const firebaseConfig = {
@@ -985,10 +990,36 @@ function deleteEvent(){
 /* ============================================================
    車両予約の作成（機材管理システム eqmgr_data/reservations に反映）
    ============================================================ */
-async function openVehResModal(){
+let vrSelectedVehicleId = null;
+function renderVehiclePick(){
   const vehicles = cals.filter(c=>(c.kind||"schedule")==="vehicle");
+  const wrap = $("vrVehiclePick"); wrap.innerHTML = "";
+  vehicles.forEach(v=>{
+    const sel = v.id===vrSelectedVehicleId;
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "calpick-btn" + (sel?" sel":""); if(sel){ b.style.background=v.color; b.style.color=v.textColor||"#fff"; }
+    b.innerHTML = `<span class="dot" style="background:${v.color}"></span>${escapeHtml(v.name)}`;
+    b.onclick = ()=>{ vrSelectedVehicleId = v.id; renderVehiclePick(); };
+    wrap.appendChild(b);
+  });
+  wrap.classList.remove("expanded");
+  const toggle = $("vrVehicleToggle");
+  toggle.textContent = "すべて表示 ▾";
+  requestAnimationFrame(()=>{
+    toggle.style.display = wrap.scrollHeight > 92 ? "block" : "none";
+  });
+  return vehicles;
+}
+$("vrVehicleToggle").onclick = ()=>{
+  const wrap = $("vrVehiclePick");
+  const expanded = wrap.classList.toggle("expanded");
+  $("vrVehicleToggle").textContent = expanded ? "閉じる ▴" : "すべて表示 ▾";
+};
+async function openVehResModal(){
+  const vehicles = renderVehiclePick();
   if(vehicles.length===0){ toast("登録されている車両がありません"); return; }
-  const sel = $("vrVehicle"); sel.innerHTML = vehicles.map(v=>`<option value="${v.id}">${escapeHtml(v.name)}</option>`).join("");
+  if(!vehicles.some(v=>v.id===vrSelectedVehicleId)){ vrSelectedVehicleId = vehicles[0].id; renderVehiclePick(); }
   const today = ymd(now.getFullYear(),now.getMonth(),now.getDate());
   $("vrProject").value = ""; $("vrStart").value = today; $("vrEnd").value = today;
   $("vrLoc").value = ""; $("vrNote").value = "";
@@ -1013,7 +1044,7 @@ function vehConflicts(equipmentId, sDate, eDate){
 $("vrStart").addEventListener("change", ()=>{ if($("vrEnd").value < $("vrStart").value) $("vrEnd").value = $("vrStart").value; });
 $("vrCancel").onclick = ()=> closeScrim("vehResScrim");
 $("vrSave").onclick = async ()=>{
-  const vehCalId = $("vrVehicle").value;
+  const vehCalId = vrSelectedVehicleId;
   const vehCal = cals.find(c=>c.id===vehCalId);
   const equipmentId = vehCal && vehCal.equipmentId;
   const projectName = $("vrProject").value.trim();
@@ -1025,6 +1056,7 @@ $("vrSave").onclick = async ()=>{
   const useLocation = $("vrLoc").value.trim();
   const notes = $("vrNote").value.trim();
 
+  if(!vehCal){ toast("車両を選択してください"); return; }
   if(!equipmentId){ toast("この車両は機材IDが見つかりません（再同期が必要な可能性があります）"); return; }
   if(!projectName){ toast("案件名を入力してください"); return; }
   if(!userId){ toast("利用者を選択してください"); return; }
