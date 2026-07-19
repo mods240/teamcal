@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!-- ============================================================
      TeamCal  —  共有カレンダー  Phase 3
-     BUILD 2026-07-20f
+     BUILD 2026-07-20g
      ・予定項目を拡張：ラベル／担当者／開始日時・終了日時（複数日対応）／リマインダー／メモ
      ・機材予約(eqmgr_data/reservations)を読み取り専用で参照し、
        期間重複＋担当者一致で自動紐付け。手動での追加/除外にも対応
@@ -436,6 +436,21 @@ input,select{ font-family:inherit; }
     <div class="field"><label>表示名（この端末）</label>
       <input class="input" id="userName" placeholder="お名前" autocomplete="off"></div>
     <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:4px">権限：<span id="userRole">—</span></div>
+
+    <h3 style="font-size:13px;font-weight:800;color:var(--muted);margin:20px 0 8px;">🎨 自分の色を設定</h3>
+    <p style="font-size:12px;color:var(--muted);margin:0 0 10px;line-height:1.6;">ここで設定すると、kizai-kanri（機材管理）側にも反映されます。逆にkizai-kanriで変更した場合もここに反映されます。</p>
+    <div class="field"><label>自分（担当者）</label>
+      <div class="calpick accordion" id="myColorPick"></div>
+      <button class="filters-toggle" id="myColorToggle" style="display:none;margin-top:6px;">すべて表示 ▾</button>
+    </div>
+    <div class="field row2" id="myColorFields" style="display:none">
+      <div><label>色</label><input class="input" id="myColor" type="color" style="height:44px;padding:2px;cursor:pointer;"></div>
+      <div><label>文字色</label><input class="input" id="myTextColor" type="color" style="height:44px;padding:2px;cursor:pointer;"></div>
+    </div>
+    <div class="actions" id="myColorActions" style="display:none;margin-top:0;margin-bottom:20px;">
+      <button class="btn btn-primary" id="myColorSave" style="flex:1">この色で保存</button>
+    </div>
+
     <div class="actions">
       <button class="btn btn-ghost" id="userClose">閉じる</button>
       <button class="btn btn-danger" id="logoutBtn">ログアウト</button>
@@ -457,7 +472,7 @@ import { getDatabase, ref, onValue, push, update, remove, get, runTransaction }
 import { getAuth, signInAnonymously }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
-const APP_VERSION = "2026-07-20f";
+const APP_VERSION = "2026-07-20g";
 
 /* ---- kizai-kanri と同じ Firebase プロジェクト ---- */
 const firebaseConfig = {
@@ -1176,8 +1191,72 @@ $("dayAdd").onclick = ()=>{
 $("confirmNo").onclick = ()=> closeScrim("confirmScrim");
 $("confirmYes").onclick = ()=>{ closeScrim("confirmScrim"); if(confirmCb) confirmCb(); confirmCb=null; };
 
+/* ============================================================
+   自分の色を設定（kizai-kanriの利用者データと双方向に同期）
+   ============================================================ */
+let myColorSelectedCalId = null;
+function renderMyColorPick(){
+  const people = cals.filter(c=>(c.kind||"schedule")==="schedule");
+  const wrap = $("myColorPick"); wrap.innerHTML = "";
+  people.forEach(p=>{
+    const sel = p.id===myColorSelectedCalId;
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "calpick-btn" + (sel?" sel":""); if(sel){ b.style.background=p.color; b.style.color=p.textColor||"#fff"; }
+    b.innerHTML = `<span class="dot" style="background:${p.color}"></span>${escapeHtml(p.name)}`;
+    b.onclick = ()=>{ myColorSelectedCalId = p.id; selectMyColor(p); renderMyColorPick(); };
+    wrap.appendChild(b);
+  });
+  wrap.classList.remove("expanded");
+  const toggle = $("myColorToggle");
+  toggle.textContent = "すべて表示 ▾";
+  requestAnimationFrame(()=>{ toggle.style.display = wrap.scrollHeight > 92 ? "block" : "none"; });
+}
+function selectMyColor(p){
+  $("myColor").value = p.color || "#8A98A5";
+  $("myTextColor").value = p.textColor || "#1a1a1a";
+  $("myColorFields").style.display = "flex";
+  $("myColorActions").style.display = "flex";
+}
+$("myColorToggle").onclick = ()=>{
+  const wrap = $("myColorPick");
+  const expanded = wrap.classList.toggle("expanded");
+  $("myColorToggle").textContent = expanded ? "閉じる ▴" : "すべて表示 ▾";
+};
+$("myColorSave").onclick = async ()=>{
+  const cal = cals.find(c=>c.id===myColorSelectedCalId);
+  if(!cal){ toast("担当者を選択してください"); return; }
+  const color = $("myColor").value;
+  const textColor = $("myTextColor").value;
+  $("myColorSave").disabled = true;
+  try{
+    // TeamCal側のカレンダーに即時反映
+    await update(ref(db,"teamcal/calendars/"+cal.id), { ...cal, color, textColor });
+    // kizai-kanri側のユーザーデータにも反映（安全のためトランザクションで更新）
+    const userId = cal.userId || cal.id.replace(/^u/,"");
+    await runTransaction(ref(db,"eqmgr_data/users"), (current)=>{
+      const arr = Array.isArray(current) ? current.slice() : (current ? Object.values(current) : []);
+      const idx = arr.findIndex(u=>u && String(u.id)===String(userId));
+      if(idx>=0){ arr[idx] = { ...arr[idx], color, textColor }; }
+      return arr;
+    });
+    toast("色を保存しました");
+    closeScrim("userScrim");
+  }catch(e){
+    toast("保存に失敗しました: "+e.message);
+    console.error(e);
+  }finally{
+    $("myColorSave").disabled = false;
+  }
+};
+
 $("userBtn").onclick = ()=>{ $("userName").value = (auth&&auth.name)||"";
-  $("userRole").textContent = (auth&&auth.role==="admin")?"管理者":"メンバー"; openScrim("userScrim"); };
+  $("userRole").textContent = (auth&&auth.role==="admin")?"管理者":"メンバー";
+  $("myColorFields").style.display = "none";
+  $("myColorActions").style.display = "none";
+  myColorSelectedCalId = null;
+  renderMyColorPick();
+  openScrim("userScrim"); };
 $("userClose").onclick = ()=> closeScrim("userScrim");
 $("userSave").onclick = ()=>{ const n=$("userName").value.trim(); if(auth){ auth.name=n||auth.name; store.set("teamcal_auth_v1",auth);} closeScrim("userScrim"); toast("表示名を保存しました"); };
 $("logoutBtn").onclick = logout;
