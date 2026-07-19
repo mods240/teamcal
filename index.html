@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!-- ============================================================
      TeamCal  —  共有カレンダー  Phase 3
-     BUILD 2026-07-13f
+     BUILD 2026-07-13g
      ・予定項目を拡張：ラベル／担当者／開始日時・終了日時（複数日対応）／リマインダー／メモ
      ・機材予約(eqmgr_data/reservations)を読み取り専用で参照し、
        期間重複＋担当者一致で自動紐付け。手動での追加/除外にも対応
@@ -256,6 +256,7 @@ input,select{ font-family:inherit; }
         <span class="name">TeamCal<span class="conn" id="connDot" title="接続状態"></span></span>
       </div>
       <button class="today-btn" id="todayBtn">今日</button>
+      <button class="icon-btn" id="weekStartBtn" aria-label="週の始まり切替" title="週の始まりを切替" style="font-size:11px;font-weight:800;">日</button>
       <button class="icon-btn" id="userBtn" aria-label="アカウント">
         <svg width="19" height="19" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.6" stroke="currentColor" stroke-width="2"/><path d="M5 20c0-3.3 3.1-5.5 7-5.5s7 2.2 7 5.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
       </button>
@@ -271,9 +272,7 @@ input,select{ font-family:inherit; }
     <div class="filters" id="filters"></div>
   </header>
 
-  <div class="weekhead">
-    <div class="sun">日</div><div>月</div><div>火</div><div>水</div><div>木</div><div>金</div><div class="sat">土</div>
-  </div>
+  <div class="weekhead" id="weekhead"></div>
   <div class="grid" id="grid"></div>
 </div>
 
@@ -403,7 +402,7 @@ import { getDatabase, ref, onValue, push, update, remove, get }
 import { getAuth, signInAnonymously }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
-const APP_VERSION = "2026-07-13f";
+const APP_VERSION = "2026-07-13g";
 
 /* ---- kizai-kanri と同じ Firebase プロジェクト ---- */
 const firebaseConfig = {
@@ -446,6 +445,7 @@ let cals = [];
 let events = [];
 let reservations = [];      // eqmgr_data/reservations（読み取り専用）
 let hidden = new Set(store.get("teamcal_hidden_v1", []));
+let weekStart = store.get("teamcal_weekstart_v1", 0); // 0=日曜始まり, 1=月曜始まり
 let auth = store.get("teamcal_auth_v1", null);
 let editingId = null;
 let editorReadonly = false;
@@ -572,12 +572,22 @@ function renderFilters(){
     wrap.appendChild(b);
   });
 }
+function renderWeekhead(){
+  const labels = weekStart===1 ? ["月","火","水","木","金","土","日"] : ["日","月","火","水","木","金","土"];
+  $("weekhead").innerHTML = labels.map((l,i)=>{
+    const dowIndex = (i + weekStart) % 7; // 実際の曜日番号(0=日)
+    const cls = dowIndex===0 ? "sun" : (dowIndex===6 ? "sat" : "");
+    return `<div class="${cls}">${l}</div>`;
+  }).join("");
+}
 function renderGrid(){
   $("mTitle").textContent = (viewM+1)+"月";
   $("mYear").textContent = viewY;
+  renderWeekhead();
   const grid = $("grid"); grid.innerHTML = "";
   const first = new Date(viewY, viewM, 1);
-  const start = new Date(viewY, viewM, 1 - first.getDay());
+  const shift = (first.getDay() - weekStart + 7) % 7;
+  const start = new Date(viewY, viewM, 1 - shift);
   const todayStr = ymd(now.getFullYear(), now.getMonth(), now.getDate());
   const maxChips = window.innerWidth < 560 ? 3 : 4;
 
@@ -876,6 +886,13 @@ $("loginPw").addEventListener("keydown", e=>{ if(e.key==="Enter") tryLogin(); })
 $("prevBtn").onclick = ()=>{ viewM--; if(viewM<0){viewM=11;viewY--;} renderGrid(); };
 $("nextBtn").onclick = ()=>{ viewM++; if(viewM>11){viewM=0;viewY++;} renderGrid(); };
 $("todayBtn").onclick = ()=>{ viewY=now.getFullYear(); viewM=now.getMonth(); renderGrid(); };
+$("weekStartBtn").onclick = ()=>{
+  weekStart = weekStart===1 ? 0 : 1;
+  store.set("teamcal_weekstart_v1", weekStart);
+  $("weekStartBtn").textContent = weekStart===1 ? "月" : "日";
+  renderGrid();
+};
+$("weekStartBtn").textContent = weekStart===1 ? "月" : "日";
 $("fab").onclick = ()=> openEditor(null,null);
 
 $("fAllday").onclick = ()=>{ if(editorReadonly) return; setAllday(!draft.allDay); };
