@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!-- ============================================================
      TeamCal  —  共有カレンダー  Phase 3
-     BUILD 2026-07-19b
+     BUILD 2026-07-19c
      ・予定項目を拡張：ラベル／担当者／開始日時・終了日時（複数日対応）／リマインダー／メモ
      ・機材予約(eqmgr_data/reservations)を読み取り専用で参照し、
        期間重複＋担当者一致で自動紐付け。手動での追加/除外にも対応
@@ -97,7 +97,7 @@ input,select{ font-family:inherit; }
 .grid{ display:grid; grid-template-columns:repeat(7,1fr); gap:6px; padding:0 8px 8px; }
 .cell{ position:relative; min-height:104px; background:var(--surface); border-radius:12px;
   padding:6px 5px 5px; box-shadow:var(--shadow-sm); display:flex; flex-direction:column; gap:3px;
-  transition:transform .1s, box-shadow .15s; overflow:hidden; text-align:left; width:100%; }
+  transition:transform .1s, box-shadow .15s; overflow:visible; text-align:left; width:100%; }
 .cell:active{ transform:scale(.985); }
 .cell.out{ background:var(--green-soft); box-shadow:none; }
 .cell.out .num{ color:#B6C2BE; }
@@ -107,16 +107,16 @@ input,select{ font-family:inherit; }
 .cell.today .num{ background:var(--green); color:#fff !important; box-shadow:var(--shadow-fab); }
 .cell.today{ box-shadow:0 0 0 2px var(--green) inset, var(--shadow-sm); }
 .ev{ display:flex; align-items:center; gap:4px; font-size:11px; font-weight:600; line-height:1.35;
-  padding:2.5px 6px; border-radius:7px; color:#fff; white-space:nowrap; overflow:hidden;
-  text-overflow:ellipsis; transition:transform .1s, filter .12s; }
+  padding:2.5px 6px; border-radius:7px; color:#2B332F; white-space:nowrap; overflow:hidden;
+  text-overflow:ellipsis; transition:transform .1s, filter .12s; position:relative; z-index:1; }
 .ev:active{ transform:scale(.97); filter:brightness(.95); }
 .ev .t{ overflow:hidden; text-overflow:ellipsis; }
 .ev.timed{ background:var(--surface); color:var(--ink); border:1px solid var(--line); padding-left:5px; }
 .ev.timed .bar{ width:3px; align-self:stretch; border-radius:3px; flex:0 0 auto; }
 .ev.timed .hm{ color:var(--muted); font-weight:700; font-size:10px; flex:0 0 auto; }
 .ev.span{ border-radius:4px; }
-.ev.span.cont-l{ border-top-left-radius:0; border-bottom-left-radius:0; }
-.ev.span.cont-r{ border-top-right-radius:0; border-bottom-right-radius:0; }
+.ev.span.cont-l{ margin-left:-8px; padding-left:9px; border-top-left-radius:0; border-bottom-left-radius:0; }
+.ev.span.cont-r{ margin-right:-8px; padding-right:9px; border-top-right-radius:0; border-bottom-right-radius:0; }
 .more{ font-size:10.5px; font-weight:700; color:var(--muted); padding:1px 6px; }
 
 .fab{ position:fixed; z-index:40; right:calc(env(safe-area-inset-right) + 20px);
@@ -415,7 +415,7 @@ import { getDatabase, ref, onValue, push, update, remove, get }
 import { getAuth, signInAnonymously }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
-const APP_VERSION = "2026-07-19b";
+const APP_VERSION = "2026-07-19c";
 
 /* ---- kizai-kanri と同じ Firebase プロジェクト ---- */
 const firebaseConfig = {
