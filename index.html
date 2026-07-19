@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!-- ============================================================
      TeamCal  —  共有カレンダー  Phase 3
-     BUILD 2026-07-20g
+     BUILD 2026-07-20k
      ・予定項目を拡張：ラベル／担当者／開始日時・終了日時（複数日対応）／リマインダー／メモ
      ・機材予約(eqmgr_data/reservations)を読み取り専用で参照し、
        期間重複＋担当者一致で自動紐付け。手動での追加/除外にも対応
@@ -15,6 +15,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>TeamCal</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIj4KICA8ZGVmcz4KICAgIDxsaW5lYXJHcmFkaWVudCBpZD0iZyIgeDE9IjE1JSIgeTE9IjAlIiB4Mj0iODUlIiB5Mj0iMTAwJSI+CiAgICAgIDxzdG9wIG9mZnNldD0iMCUiIHN0b3AtY29sb3I9IiMxNkJGQTAiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIxMDAlIiBzdG9wLWNvbG9yPSIjMEU5QzgzIi8+CiAgICA8L2xpbmVhckdyYWRpZW50PgogIDwvZGVmcz4KICA8cmVjdCB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiIgcng9IjExNSIgZmlsbD0idXJsKCNnKSIvPgogIDxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDI1NiwyNTYpIHNjYWxlKDE5KSB0cmFuc2xhdGUoLTEyLC0xMikiPgogICAgPHBhdGggZD0iTTEyIDNDOSAzIDcgNS4yIDcgNy44Yy0xLjcuNC0zIDEuOS0zIDMuOCAwIDIuMiAxLjggNCA0IDRoM3YzLjRjMCAuNi40IDEgMSAxczEtLjQgMS0xVjE5LjRoM2MyLjIgMCA0LTEuOCA0LTQgMC0xLjktMS4zLTMuNC0zLTMuOEMxNyA1LjIgMTUgMyAxMiAzWiIgZmlsbD0iI2ZmZiIvPgogIDwvZz4KPC9zdmc+Cg==">
+<link rel="icon" type="image/png" sizes="32x32" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAABmJLR0QA/wD/AP+gvaeTAAAEGElEQVRYhaWXW2hcVRSGv73nJJlcJk0nMzQX6CWVWlKLxYI2aKymEUTR1kq99EEhIOaxiL4Ial8FESxCXyRKBQlpMSL6oK0toi0VjGCDkNBiMKlNc5lGbRJzm7N8yJlz9plzcZLul3Vmzt7r//+19/r3jMIY2Qt9NYr5brAPK1E7RdgoCAgQiICIE8T3uXi+CFOI/Krg4+mByV6OH7cLmKrwkDl/ar9Wdi8iDYVkhTwEAMQI8QSlaJ1CXWQ5cWT62VfHXQKZ86f2a/LfAuWr6+9ctfcYJK+EEa1W2iYPHpvQ2Qt9NZp87yq4xIDLahJxwAuVcaP3LO4cCbxzBG5bsROfIaIsZc92g2pw9ipUbVB1dOmjVONOccl01H/x4UELOLzWkrfWpHmqoYUtlSkArs7OcPrPq4zN/xNLUIqF2XaXyp7rmQGpK0V1MpHgvdaHeK55h3d6nbGQX+G1we/pGxsOkAgKxDmQTGkPXGLABa2gZ08nz4eAAyQTFifufZR9Gxt9ex99XgQRyeiwl94h8t49vWkbj2U3h0B7w1Kat1r3uaolQpghUOlw1YVFXulebL47FrwwHkg3sr26LrZLzE7SpbbXzlS6JAIAnZs2R6h2qmsIs1xgp1rFp7e9vonX79pLU7K6ZAK7ajO+1os7jJbP0Yo64VBjCyf3HMBSumRwgJaaDb48cZZtRfXsBquCd3e1rxkcIFtR5W1rjLEhghVlGA/XN5MuT64ZHKAqYUWo9oMLoMN8HBG2VtWuCxygrjxJW6Yprv9dHG2akBgMJxfn1k2gMmHx9SNHONP+DKmy8oBqs8V11O119uYo8/nldZMA6GjYwsn7H/fAQyqiTdVmzC3N885vl+6IAMATzdvZXZeN7ARd7FBm7Pl9kO6Bs9xcWP92AOxNNxBwV3HbMN4wTo8O8fnYMK2petIVSWcxbK2p5f37DpREoNoqM3zG6wgRCfpA4M4WIS/C4F+TxtfC7sVsyRUYyI2HCxQ8H4i6s83os2yXafy4PHWdyxPXQ3KsxqK7oDiGsDYJ/s8Y+nuarh+/dG/YsOpasvpWRd/ZJqgXZ5eXXKCfc+OuZQvCxL9zfHdjhE+vXWExvxIi0MtlIZIDMiWrduaN3J6h69JXINA/OhQgaB60mOrmLOAnRJ4sRbVJQoD+P4aCSSP2OiyXCENa2fmP3ImF8xDjDaaPh3p9pGp/pzn/QPoVIip95oNzAh1Rak3VsYqM9oqqoJdD3agsK9+hUUqsZY6CPRKqKFK1vwK+n3OR4G6VlsTOvzDx0htzGmDy6LGJhFYPInIxWnVYUnFKGlXyggAfwXGx7c7br7z9A0DCKTTzfd/MLtzT9klltmwYVEqJpESojtuW0v6gCgi3QH4RmxNVFcmXb3W9ea2A+x82cR86CNzCfQAAAABJRU5ErkJggg==">
+<link rel="apple-touch-icon" sizes="180x180" href="data:image/png;base64,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">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="TeamCal">
+<meta name="theme-color" content="#16BFA0">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;500;700;800&display=swap" rel="stylesheet">
@@ -83,6 +90,11 @@ input,select{ font-family:inherit; }
 .settings-h{ font-size:13px; font-weight:800; color:var(--muted); margin:18px 0 8px; }
 .settings-h:first-child{ margin-top:4px; }
 .settings-hint{ font-size:12px; color:var(--muted); margin-top:18px; line-height:1.6; }
+.people-manage{ display:flex; flex-direction:column; gap:8px; }
+.people-row{ display:flex; align-items:center; gap:10px; background:var(--bg); border-radius:12px; padding:10px 12px; }
+.people-row .dot{ width:14px; height:14px; border-radius:50%; flex:0 0 auto; }
+.people-row .pname{ flex:1; font-size:14px; font-weight:700; }
+.people-row .pdel{ font-size:12px; font-weight:700; color:var(--sun); background:#FDECEB; border-radius:999px; padding:6px 12px; }
 .chip{ flex:0 0 auto; display:inline-flex; align-items:center; gap:7px; padding:7px 13px 7px 11px;
   border-radius:999px; background:var(--surface); border:1px solid var(--line);
   font-size:13px; font-weight:600; box-shadow:var(--shadow-sm); transition:opacity .15s, transform .1s; }
@@ -153,8 +165,6 @@ input,select{ font-family:inherit; }
 .textarea{ min-height:70px; resize:vertical; line-height:1.6; }
 .row2{ display:flex; gap:10px; } .row2 > *{ flex:1; }
 .calpick{ display:flex; flex-wrap:wrap; gap:8px; }
-.calpick.accordion{ overflow:hidden; max-height:88px; }
-.calpick.accordion.expanded{ max-height:none; }
 .filters-toggle{ font-size:12px; font-weight:700; color:var(--green-deep); background:none; border:none; padding:2px 0; }
 .calpick-btn{ display:inline-flex; align-items:center; gap:7px; padding:9px 14px; border-radius:999px;
   font-size:13px; font-weight:700; background:var(--bg); color:var(--muted); border:1.5px solid transparent;
@@ -261,15 +271,18 @@ input,select{ font-family:inherit; }
 <div class="app" id="app" style="display:none">
   <header class="appbar">
     <div class="appbar-top">
-      <div class="brand">
+      <button class="brand" id="reloadBtn" aria-label="最新の状態に更新" title="タップして更新" style="cursor:pointer;">
         <span class="mark" aria-hidden="true">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
             <path d="M12 3C9 3 7 5.2 7 7.8c-1.7.4-3 1.9-3 3.8 0 2.2 1.8 4 4 4h3v3.4c0 .6.4 1 1 1s1-.4 1-1V19.4h3c2.2 0 4-1.8 4-4 0-1.9-1.3-3.4-3-3.8C17 5.2 15 3 12 3Z" fill="#fff"/>
           </svg>
         </span>
         <span class="name">TeamCal<span class="conn" id="connDot" title="接続状態"></span></span>
-      </div>
+      </button>
       <button class="today-btn" id="todayBtn">今日</button>
+      <a class="icon-btn" id="kizaiLink" href="https://ai-kanri-ten.vercel.app/" target="_blank" rel="noopener" aria-label="機材管理システムを開く" title="機材管理システムを開く" style="text-decoration:none;display:grid;place-items:center;">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M14 5h5v5M20 5l-7 7M10 5H6a1 1 0 00-1 1v12a1 1 0 001 1h12a1 1 0 001-1v-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </a>
       <button class="icon-btn" id="weekStartBtn" aria-label="週の始まり切替" title="週の始まりを切替" style="font-size:11px;font-weight:800;">日</button>
       <button class="icon-btn" id="userBtn" aria-label="アカウント">
         <svg width="19" height="19" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.6" stroke="currentColor" stroke-width="2"/><path d="M5 20c0-3.3 3.1-5.5 7-5.5s7 2.2 7 5.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
@@ -294,6 +307,14 @@ input,select{ font-family:inherit; }
   <div class="grid" id="grid"></div>
 
   <div class="settings-panel" id="settingsPanel" style="display:none">
+    <h3 class="settings-h">👤 担当者の管理</h3>
+    <div class="people-manage" id="peopleManage"></div>
+    <div class="field row2" style="margin-top:10px;">
+      <input class="input" id="newPersonName" placeholder="新しい担当者の名前" autocomplete="off">
+      <button class="btn btn-primary" id="addPersonBtn" style="flex:0 0 auto;padding-inline:20px;">＋ 追加</button>
+    </div>
+    <p class="settings-hint">機材管理システム（kizai-kanri）のユーザーとしても登録され、双方向に連動します</p>
+
     <h3 class="settings-h">📅 予定のカレンダー</h3>
     <div class="filters expanded" id="filtersSchedule"></div>
     <h3 class="settings-h">🚗 車両カレンダー</h3>
@@ -433,15 +454,12 @@ input,select{ font-family:inherit; }
   <div class="sheet" role="dialog" aria-modal="true" aria-label="アカウント">
     <div class="grabber"></div>
     <h2>アカウント</h2>
-    <div class="field"><label>表示名（この端末）</label>
-      <input class="input" id="userName" placeholder="お名前" autocomplete="off"></div>
-    <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:4px">権限：<span id="userRole">—</span></div>
 
-    <h3 style="font-size:13px;font-weight:800;color:var(--muted);margin:20px 0 8px;">🎨 自分の色を設定</h3>
-    <p style="font-size:12px;color:var(--muted);margin:0 0 10px;line-height:1.6;">ここで設定すると、kizai-kanri（機材管理）側にも反映されます。逆にkizai-kanriで変更した場合もここに反映されます。</p>
+    <h3 style="font-size:13px;font-weight:800;color:var(--muted);margin:4px 0 8px;">🎨 自分の色を設定</h3>
+    <p style="font-size:12px;color:var(--muted);margin:0 0 10px;line-height:1.6;">選んだ担当者が、この端末での「自分」として記録されます。ここで色を設定すると、kizai-kanri（機材管理）側にも反映されます。逆にkizai-kanriで変更した場合もここに反映されます。</p>
     <div class="field"><label>自分（担当者）</label>
       <div class="calpick accordion" id="myColorPick"></div>
-      <button class="filters-toggle" id="myColorToggle" style="display:none;margin-top:6px;">すべて表示 ▾</button>
+      <button class="filters-toggle" id="myColorToggle" style="display:none;margin-top:6px;">もっと見る ▾</button>
     </div>
     <div class="field row2" id="myColorFields" style="display:none">
       <div><label>色</label><input class="input" id="myColor" type="color" style="height:44px;padding:2px;cursor:pointer;"></div>
@@ -454,7 +472,6 @@ input,select{ font-family:inherit; }
     <div class="actions">
       <button class="btn btn-ghost" id="userClose">閉じる</button>
       <button class="btn btn-danger" id="logoutBtn">ログアウト</button>
-      <button class="btn btn-primary" id="userSave">保存</button>
     </div>
   </div>
 </div>
@@ -472,7 +489,7 @@ import { getDatabase, ref, onValue, push, update, remove, get, runTransaction }
 import { getAuth, signInAnonymously }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
-const APP_VERSION = "2026-07-20g";
+const APP_VERSION = "2026-07-20k";
 
 /* ---- kizai-kanri と同じ Firebase プロジェクト ---- */
 const firebaseConfig = {
@@ -637,7 +654,74 @@ function renderFilters(){
   };
   buildGroup("filtersSchedule", "schedule");
   buildGroup("filtersVehicle", "vehicle");
+  renderPeopleManage();
 }
+
+/* ============================================================
+   担当者の追加・削除（kizai-kanriのユーザーデータと双方向に連動）
+   ============================================================ */
+const PERSON_PALETTE = ['#F0625D','#3A9BE8','#3FB37F','#D98C1F','#7C6FE0','#E0578F','#2FA0A0','#C77B3A','#5C8AE6','#B25CC9'];
+function personColorFor(seed){
+  seed = String(seed||""); let h=0;
+  for(let i=0;i<seed.length;i++){ h=(h*31+seed.charCodeAt(i))>>>0; }
+  return PERSON_PALETTE[h % PERSON_PALETTE.length];
+}
+function renderPeopleManage(){
+  const wrap = $("peopleManage"); if(!wrap) return;
+  wrap.innerHTML = "";
+  cals.filter(c=>(c.kind||"schedule")==="schedule").forEach(c=>{
+    const row = document.createElement("div"); row.className = "people-row";
+    row.innerHTML = `<span class="dot" style="background:${c.color}"></span>`+
+      `<span class="pname">${escapeHtml(c.name)}</span>`+
+      `<button class="pdel" data-id="${c.id}">削除</button>`;
+    row.querySelector(".pdel").onclick = ()=> deletePerson(c);
+    wrap.appendChild(row);
+  });
+}
+async function addPerson(){
+  const name = $("newPersonName").value.trim();
+  if(!name){ toast("名前を入力してください"); return; }
+  $("addPersonBtn").disabled = true;
+  try{
+    const userId = Date.now().toString(36)+Math.random().toString(36).slice(2);
+    const color = personColorFor(userId+name);
+    const newUser = { id: userId, name, color, textColor: "#1a1a1a", password: "" };
+    // kizai-kanriのユーザーデータに安全に追記
+    await runTransaction(ref(db,"eqmgr_data/users"), (current)=>{
+      const arr = Array.isArray(current) ? current.slice() : (current ? Object.values(current) : []);
+      arr.push(newUser);
+      return arr;
+    });
+    // TeamCal側のカレンダーも作成
+    await update(ref(db,"teamcal/calendars/u"+userId), { name, color, textColor:"#1a1a1a", order:100, auto:true, kind:"schedule", userId });
+    $("newPersonName").value = "";
+    toast(`「${name}」さんを追加しました`);
+  }catch(e){
+    toast("追加に失敗しました: "+e.message);
+    console.error(e);
+  }finally{
+    $("addPersonBtn").disabled = false;
+  }
+}
+function deletePerson(cal){
+  openConfirm(`「${cal.name}」さんを削除しますか？（過去の予定・機材予約履歴は残ります）`, async ()=>{
+    try{
+      const userId = cal.userId || cal.id.replace(/^u/,"");
+      await runTransaction(ref(db,"eqmgr_data/users"), (current)=>{
+        const arr = Array.isArray(current) ? current.slice() : (current ? Object.values(current) : []);
+        return arr.filter(u=> !(u && String(u.id)===String(userId)));
+      });
+      await remove(ref(db,"teamcal/calendars/"+cal.id));
+      toast(`「${cal.name}」さんを削除しました`);
+    }catch(e){
+      toast("削除に失敗しました: "+e.message);
+      console.error(e);
+    }
+  });
+}
+$("addPersonBtn").onclick = addPerson;
+$("newPersonName").addEventListener("keydown", e=>{ if(e.key==="Enter") addPerson(); });
+
 function renderWeekhead(){
   const labels = weekStart===1 ? ["月","火","水","木","金","土","日"] : ["日","月","火","水","木","金","土"];
   $("weekhead").innerHTML = labels.map((l,i)=>{
@@ -1006,32 +1090,40 @@ function deleteEvent(){
    車両予約の作成（機材管理システム eqmgr_data/reservations に反映）
    ============================================================ */
 let vrSelectedVehicleId = null;
-function renderVehiclePick(){
-  const vehicles = cals.filter(c=>(c.kind||"schedule")==="vehicle");
-  const wrap = $("vrVehiclePick"); wrap.innerHTML = "";
-  vehicles.forEach(v=>{
-    const sel = v.id===vrSelectedVehicleId;
+const ACCORDION_COLLAPSED_COUNT = 4; // これを超える件数がある時だけ「もっと見る」を表示
+function renderPickChips(wrapId, toggleId, items, selectedId, onPick){
+  const wrap = $(wrapId); wrap.innerHTML = "";
+  const expanded = wrap.classList.contains("expanded");
+  const visibleItems = expanded ? items : items.slice(0, ACCORDION_COLLAPSED_COUNT);
+  visibleItems.forEach(it=>{
+    const sel = it.id===selectedId;
     const b = document.createElement("button");
     b.type = "button";
-    b.className = "calpick-btn" + (sel?" sel":""); if(sel){ b.style.background=v.color; b.style.color=v.textColor||"#fff"; }
-    b.innerHTML = `<span class="dot" style="background:${v.color}"></span>${escapeHtml(v.name)}`;
-    b.onclick = ()=>{ vrSelectedVehicleId = v.id; renderVehiclePick(); };
+    b.className = "calpick-btn" + (sel?" sel":""); if(sel){ b.style.background=it.color; b.style.color=it.textColor||"#fff"; }
+    b.innerHTML = `<span class="dot" style="background:${it.color}"></span>${escapeHtml(it.name)}`;
+    b.onclick = ()=> onPick(it);
     wrap.appendChild(b);
   });
-  wrap.classList.remove("expanded");
-  const toggle = $("vrVehicleToggle");
-  toggle.textContent = "すべて表示 ▾";
-  requestAnimationFrame(()=>{
-    toggle.style.display = wrap.scrollHeight > 92 ? "block" : "none";
-  });
+  const toggle = $(toggleId);
+  const hiddenCount = items.length - ACCORDION_COLLAPSED_COUNT;
+  if(hiddenCount>0){
+    toggle.style.display = "block";
+    toggle.textContent = expanded ? "閉じる ▴" : `もっと見る（+${hiddenCount}） ▾`;
+  }else{
+    toggle.style.display = "none";
+  }
+}
+function renderVehiclePick(){
+  const vehicles = cals.filter(c=>(c.kind||"schedule")==="vehicle");
+  renderPickChips("vrVehiclePick","vrVehicleToggle", vehicles, vrSelectedVehicleId, (v)=>{ vrSelectedVehicleId=v.id; renderVehiclePick(); });
   return vehicles;
 }
 $("vrVehicleToggle").onclick = ()=>{
-  const wrap = $("vrVehiclePick");
-  const expanded = wrap.classList.toggle("expanded");
-  $("vrVehicleToggle").textContent = expanded ? "閉じる ▴" : "すべて表示 ▾";
+  $("vrVehiclePick").classList.toggle("expanded");
+  renderVehiclePick();
 };
 async function openVehResModal(){
+  $("vrVehiclePick").classList.remove("expanded");
   const vehicles = renderVehiclePick();
   if(vehicles.length===0){ toast("登録されている車両がありません"); return; }
   if(!vehicles.some(v=>v.id===vrSelectedVehicleId)){ vrSelectedVehicleId = vehicles[0].id; renderVehiclePick(); }
@@ -1139,6 +1231,7 @@ $("loginPw").addEventListener("keydown", e=>{ if(e.key==="Enter") tryLogin(); })
 $("prevBtn").onclick = ()=>{ viewM--; if(viewM<0){viewM=11;viewY--;} renderGrid(); };
 $("nextBtn").onclick = ()=>{ viewM++; if(viewM>11){viewM=0;viewY++;} renderGrid(); };
 $("todayBtn").onclick = ()=>{ viewY=now.getFullYear(); viewM=now.getMonth(); renderGrid(); };
+$("reloadBtn").onclick = ()=> location.reload();
 $("weekStartBtn").onclick = ()=>{
   weekStart = weekStart===1 ? 0 : 1;
   store.set("teamcal_weekstart_v1", weekStart);
@@ -1197,20 +1290,7 @@ $("confirmYes").onclick = ()=>{ closeScrim("confirmScrim"); if(confirmCb) confir
 let myColorSelectedCalId = null;
 function renderMyColorPick(){
   const people = cals.filter(c=>(c.kind||"schedule")==="schedule");
-  const wrap = $("myColorPick"); wrap.innerHTML = "";
-  people.forEach(p=>{
-    const sel = p.id===myColorSelectedCalId;
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "calpick-btn" + (sel?" sel":""); if(sel){ b.style.background=p.color; b.style.color=p.textColor||"#fff"; }
-    b.innerHTML = `<span class="dot" style="background:${p.color}"></span>${escapeHtml(p.name)}`;
-    b.onclick = ()=>{ myColorSelectedCalId = p.id; selectMyColor(p); renderMyColorPick(); };
-    wrap.appendChild(b);
-  });
-  wrap.classList.remove("expanded");
-  const toggle = $("myColorToggle");
-  toggle.textContent = "すべて表示 ▾";
-  requestAnimationFrame(()=>{ toggle.style.display = wrap.scrollHeight > 92 ? "block" : "none"; });
+  renderPickChips("myColorPick","myColorToggle", people, myColorSelectedCalId, (p)=>{ myColorSelectedCalId=p.id; selectMyColor(p); renderMyColorPick(); });
 }
 function selectMyColor(p){
   $("myColor").value = p.color || "#8A98A5";
@@ -1219,9 +1299,8 @@ function selectMyColor(p){
   $("myColorActions").style.display = "flex";
 }
 $("myColorToggle").onclick = ()=>{
-  const wrap = $("myColorPick");
-  const expanded = wrap.classList.toggle("expanded");
-  $("myColorToggle").textContent = expanded ? "閉じる ▴" : "すべて表示 ▾";
+  $("myColorPick").classList.toggle("expanded");
+  renderMyColorPick();
 };
 $("myColorSave").onclick = async ()=>{
   const cal = cals.find(c=>c.id===myColorSelectedCalId);
@@ -1241,6 +1320,8 @@ $("myColorSave").onclick = async ()=>{
       return arr;
     });
     toast("色を保存しました");
+    if(auth){ auth.name = cal.name; store.set("teamcal_auth_v1", auth); }
+    store.set("teamcal_myperson_v1", cal.id);
     closeScrim("userScrim");
   }catch(e){
     toast("保存に失敗しました: "+e.message);
@@ -1250,15 +1331,17 @@ $("myColorSave").onclick = async ()=>{
   }
 };
 
-$("userBtn").onclick = ()=>{ $("userName").value = (auth&&auth.name)||"";
-  $("userRole").textContent = (auth&&auth.role==="admin")?"管理者":"メンバー";
+$("userBtn").onclick = ()=>{
   $("myColorFields").style.display = "none";
   $("myColorActions").style.display = "none";
-  myColorSelectedCalId = null;
+  $("myColorPick").classList.remove("expanded");
+  myColorSelectedCalId = store.get("teamcal_myperson_v1", null);
   renderMyColorPick();
-  openScrim("userScrim"); };
+  const preselected = cals.find(c=>c.id===myColorSelectedCalId);
+  if(preselected) selectMyColor(preselected);
+  openScrim("userScrim");
+};
 $("userClose").onclick = ()=> closeScrim("userScrim");
-$("userSave").onclick = ()=>{ const n=$("userName").value.trim(); if(auth){ auth.name=n||auth.name; store.set("teamcal_auth_v1",auth);} closeScrim("userScrim"); toast("表示名を保存しました"); };
 $("logoutBtn").onclick = logout;
 
 ["editScrim","dayScrim","confirmScrim","userScrim","vehResScrim"].forEach(id=>{
