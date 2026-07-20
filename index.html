@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!-- ============================================================
      TeamCal  —  共有カレンダー  Phase 3
-     BUILD 2026-07-20q
+     BUILD 2026-07-20r
      ・予定項目を拡張：ラベル／担当者／開始日時・終了日時（複数日対応）／リマインダー／メモ
      ・機材予約(eqmgr_data/reservations)を読み取り専用で参照し、
        期間重複＋担当者一致で自動紐付け。手動での追加/除外にも対応
@@ -90,16 +90,19 @@ input,select{ font-family:inherit; }
 .settings-h{ font-size:13px; font-weight:800; color:var(--muted); margin:18px 0 8px; }
 .settings-h:first-child{ margin-top:4px; }
 .settings-hint{ font-size:12px; color:var(--muted); margin-top:18px; line-height:1.6; }
+.settings-toggle-btn{ margin-top:24px; width:100%; text-align:left; font-size:14px; font-weight:800;
+  color:var(--ink); background:var(--surface); border:1px solid var(--line); border-radius:12px;
+  padding:12px 14px; box-shadow:var(--shadow-sm); }
 .people-manage{ display:flex; flex-direction:column; gap:8px; }
 .people-row{ display:flex; align-items:center; gap:10px; background:var(--bg); border-radius:12px; padding:10px 12px; }
 .people-row .dot{ width:14px; height:14px; border-radius:50%; flex:0 0 auto; }
 .people-row .pname{ flex:1; font-size:14px; font-weight:700; }
 .people-row .pdel{ font-size:12px; font-weight:700; color:var(--sun); background:#FDECEB; border-radius:999px; padding:6px 12px; }
-.chip{ flex:0 0 auto; display:inline-flex; align-items:center; gap:7px; padding:7px 13px 7px 11px;
+.chip{ flex:0 0 auto; display:inline-flex; align-items:center; gap:6px; padding:5px 11px 5px 9px;
   border-radius:999px; background:var(--surface); border:1px solid var(--line);
-  font-size:13px; font-weight:600; box-shadow:var(--shadow-sm); transition:opacity .15s, transform .1s; }
+  font-size:11.5px; font-weight:600; box-shadow:var(--shadow-sm); transition:opacity .15s, transform .1s; }
 .chip:active{ transform:scale(.96); }
-.chip .dot{ width:11px; height:11px; border-radius:50%; flex:0 0 auto; }
+.chip .dot{ width:9px; height:9px; border-radius:50%; flex:0 0 auto; }
 .chip.off{ opacity:.42; }
 .chip.off .dot{ background:#C7D0CD !important; }
 
@@ -314,19 +317,22 @@ input,select{ font-family:inherit; }
   <div class="grid" id="grid"></div>
 
   <div class="settings-panel" id="settingsPanel" style="display:none">
-    <h3 class="settings-h">👤 担当者の管理</h3>
-    <div class="people-manage" id="peopleManage"></div>
-    <div class="field row2" style="margin-top:10px;">
-      <input class="input" id="newPersonName" placeholder="新しい担当者の名前" autocomplete="off">
-      <button class="btn btn-primary" id="addPersonBtn" style="flex:0 0 auto;padding-inline:20px;">＋ 追加</button>
-    </div>
-    <p class="settings-hint">機材管理システム（kizai-kanri）のユーザーとしても登録され、双方向に連動します</p>
-
     <h3 class="settings-h">📅 予定のカレンダー</h3>
     <div class="filters expanded" id="filtersSchedule"></div>
+
     <h3 class="settings-h">🚗 車両カレンダー</h3>
     <div class="filters expanded" id="filtersVehicle"></div>
-    <p class="settings-hint">オフにしたカレンダーは、予定・車両タブの表示から一時的に隠れます（データは消えません）</p>
+    <p class="settings-hint">タップして選択（色付き＝カレンダーに表示）⇄ 選択解除（グレー＝ミュート、非表示）を切り替えられます。ミュートしても、データそのものは消えません。</p>
+
+    <button class="settings-toggle-btn" id="peopleManageToggle">👤 担当者の管理 ▾</button>
+    <div id="peopleManageBody" style="display:none;margin-top:10px;">
+      <div class="people-manage" id="peopleManage"></div>
+      <div class="field row2" style="margin-top:10px;">
+        <input class="input" id="newPersonName" placeholder="新しい担当者の名前" autocomplete="off">
+        <button class="btn btn-primary" id="addPersonBtn" style="flex:0 0 auto;padding-inline:20px;">＋ 追加</button>
+      </div>
+      <p class="settings-hint">機材管理システム（kizai-kanri）のユーザーとしても登録され、双方向に連動します</p>
+    </div>
   </div>
 </div>
 
@@ -520,7 +526,7 @@ import { getDatabase, ref, onValue, push, update, remove, get, runTransaction }
 import { getAuth, signInAnonymously }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
-const APP_VERSION = "2026-07-20q";
+const APP_VERSION = "2026-07-20r";
 
 /* ---- kizai-kanri と同じ Firebase プロジェクト ---- */
 const firebaseConfig = {
@@ -762,6 +768,12 @@ function deletePerson(cal){
 }
 $("addPersonBtn").onclick = addPerson;
 $("newPersonName").addEventListener("keydown", e=>{ if(e.key==="Enter") addPerson(); });
+$("peopleManageToggle").onclick = ()=>{
+  const body = $("peopleManageBody");
+  const open = body.style.display === "none";
+  body.style.display = open ? "block" : "none";
+  $("peopleManageToggle").textContent = "👤 担当者の管理 " + (open ? "▴" : "▾");
+};
 
 function renderWeekhead(){
   const labels = weekStart===1 ? ["月","火","水","木","金","土","日"] : ["日","月","火","水","木","金","土"];
