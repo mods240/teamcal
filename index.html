@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!-- ============================================================
      TeamCal  —  共有カレンダー  Phase 3
-     BUILD 2026-07-20n
+     BUILD 2026-07-20q
      ・予定項目を拡張：ラベル／担当者／開始日時・終了日時（複数日対応）／リマインダー／メモ
      ・機材予約(eqmgr_data/reservations)を読み取り専用で参照し、
        期間重複＋担当者一致で自動紐付け。手動での追加/除外にも対応
@@ -196,6 +196,13 @@ input,select{ font-family:inherit; }
 .day-item .di-title{ font-size:15px; font-weight:700; }
 .day-item .di-meta{ font-size:12px; font-weight:600; color:var(--muted); margin-top:2px; }
 .day-empty{ text-align:center; color:var(--muted); font-size:14px; font-weight:600; padding:26px 0; }
+.note-item{ display:flex; align-items:flex-start; gap:8px; background:#FFF7DE; border-radius:10px; padding:9px 11px; }
+.note-item .ntext{ flex:1; font-size:13px; font-weight:600; color:#7A5C0A; line-height:1.5; }
+.note-item .nmeta{ font-size:10.5px; font-weight:600; color:#A9873A; margin-top:3px; }
+.note-item .ndel{ font-size:11px; color:#A9873A; flex:0 0 auto; padding:2px 4px; }
+.note-badge{ position:absolute; top:4px; right:4px; background:#F4B740; color:#5C4108; font-size:10px; font-weight:800;
+  border-radius:999px; min-width:16px; height:16px; padding:0 4px; display:flex; align-items:center; justify-content:center; z-index:3; cursor:pointer; }
+.note-badge.empty{ background:none; color:#C7D0CD; font-size:11px; opacity:.7; }
 .day-empty .em{ font-size:30px; display:block; margin-bottom:8px; opacity:.6; }
 
 /* ---- 機材予約 紐付け ---- */
@@ -430,9 +437,33 @@ input,select{ font-family:inherit; }
     <div class="grabber"></div>
     <div class="day-head"><span class="d" id="daySheetD"></span><span class="w" id="daySheetW"></span></div>
     <div class="day-list" id="dayList"></div>
+
+    <h3 style="font-size:13px;font-weight:800;color:var(--muted);margin:20px 0 8px;">📝 メモ</h3>
+    <div id="dayNotesList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px;"></div>
+    <div class="field row2" style="margin-bottom:0;">
+      <input class="input" id="dayNoteInput" placeholder="申し送り・注意事項など" autocomplete="off">
+      <button class="btn btn-primary" id="dayNoteAdd" style="flex:0 0 auto;padding-inline:18px;">追加</button>
+    </div>
+
     <div class="actions">
       <button class="btn btn-ghost" id="dayClose">閉じる</button>
       <button class="btn btn-primary" id="dayAdd">＋ 予定を追加</button>
+    </div>
+  </div>
+</div>
+
+<!-- 日付メモ専用（カレンダーのアイコンから直接開く） -->
+<div class="scrim" id="dayNoteScrim">
+  <div class="sheet" role="dialog" aria-modal="true" aria-label="日付メモ">
+    <div class="grabber"></div>
+    <h2 id="dayNoteScrimTitle">📝 メモ</h2>
+    <div id="dayNoteScrimList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px;"></div>
+    <div class="field row2" style="margin-bottom:0;">
+      <input class="input" id="dayNoteScrimInput" placeholder="申し送り・注意事項など" autocomplete="off">
+      <button class="btn btn-primary" id="dayNoteScrimAdd" style="flex:0 0 auto;padding-inline:18px;">追加</button>
+    </div>
+    <div class="actions">
+      <button class="btn btn-ghost" id="dayNoteScrimClose" style="flex:1">閉じる</button>
     </div>
   </div>
 </div>
@@ -456,7 +487,7 @@ input,select{ font-family:inherit; }
     <h2>アカウント</h2>
 
     <h3 style="font-size:13px;font-weight:800;color:var(--muted);margin:4px 0 8px;">🎨 自分の色を設定</h3>
-    <p style="font-size:12px;color:var(--muted);margin:0 0 10px;line-height:1.6;">選んだ担当者が、この端末での「自分」として記録されます。ここで色を設定すると、kizai-kanri（機材管理）側にも反映されます。逆にkizai-kanriで変更した場合もここに反映されます。</p>
+    <p style="font-size:12px;color:var(--muted);margin:0 0 10px;line-height:1.6;">選んだ担当者が、この端末での「自分」として記録されます。色・文字色はTeamCal専用の設定です（kizai-kanri側の色とは連動しません。担当者の追加・削除・改名は引き続き連動します）。</p>
     <div class="field"><label>自分（担当者）</label>
       <div class="calpick accordion" id="myColorPick"></div>
       <button class="filters-toggle" id="myColorToggle" style="display:none;margin-top:6px;">もっと見る ▾</button>
@@ -489,7 +520,7 @@ import { getDatabase, ref, onValue, push, update, remove, get, runTransaction }
 import { getAuth, signInAnonymously }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
-const APP_VERSION = "2026-07-20n";
+const APP_VERSION = "2026-07-20q";
 
 /* ---- kizai-kanri と同じ Firebase プロジェクト ---- */
 const firebaseConfig = {
@@ -527,6 +558,7 @@ let cals = [];
 let events = [];
 let reservations = [];      // eqmgr_data/reservations（読み取り専用）
 let kUsers = [];            // eqmgr_data/users（車両予約作成時の利用者選択用・読み取り専用）
+let dayNotes = {};          // dayNotes（kizai-kanriとも共有する日付メモ）
 let hidden = new Set(store.get("teamcal_hidden_v1", []));
 let weekStart = store.get("teamcal_weekstart_v1", 0); // 0=日曜始まり, 1=月曜始まり
 let viewMode = store.get("teamcal_viewmode_v1", "schedule"); // "schedule" or "vehicle"
@@ -608,6 +640,15 @@ function startListeners(){
   if(listenersStarted) return; listenersStarted = true;
 
   onValue(ref(db,".info/connected"), s=>{ $("connDot").classList.toggle("on", s.val()===true); });
+
+  onValue(ref(db,"dayNotes"), snap=>{
+    dayNotes = snap.val() || {};
+    renderGrid();
+    if($("dayScrim").classList.contains("show") && daySheetDate) renderDayNotes(daySheetDate);
+    if($("dayNoteScrim").classList.contains("show") && dayNoteScrimDate){
+      const box = $("dayNoteScrimList"); box.innerHTML = ""; box.appendChild(buildNoteRows(dayNoteScrimDate));
+    }
+  });
 
   onValue(ref(db,"teamcal/calendars"), snap=>{
     const v = snap.val();
@@ -788,6 +829,13 @@ function renderGrid(){
     num.className = "num" + (dow===0?" sun":"") + (dow===6?" sat":"");
     num.textContent = d; cell.appendChild(num);
 
+    const noteCount = dayNotes[dateStr] ? Object.keys(dayNotes[dateStr]).length : 0;
+    const badge = document.createElement("span");
+    badge.className = "note-badge" + (noteCount===0 ? " empty" : "");
+    badge.textContent = noteCount>0 ? (noteCount>9 ? "9+" : String(noteCount)) : "📝";
+    badge.onclick = (ev)=>{ ev.stopPropagation(); openDayNoteModal(dateStr); };
+    cell.appendChild(badge);
+
     if(rowLaneCount[rowIdx] > 0){
       const spacer = document.createElement("div");
       spacer.style.height = (rowLaneCount[rowIdx]*(LANE_H+LANE_GAP))+"px";
@@ -881,7 +929,63 @@ function fillDaySheet(dateStr){
       box.appendChild(it);
     });
   }
+  renderDayNotes(dateStr);
 }
+
+/* ============================================================
+   日付メモ（kizai-kanriと共有。複数件つけられる）
+   ============================================================ */
+function buildNoteRows(dateStr){
+  const notes = dayNotes[dateStr] || {};
+  const entries = Object.entries(notes).sort((a,b)=> (a[1].createdAt||0)-(b[1].createdAt||0));
+  const frag = document.createDocumentFragment();
+  if(entries.length===0){
+    const empty = document.createElement("div"); empty.className="res-empty"; empty.textContent="メモはありません";
+    frag.appendChild(empty);
+  }
+  entries.forEach(([id,n])=>{
+    const row = document.createElement("div"); row.className = "note-item";
+    const dt = n.createdAt ? new Date(n.createdAt) : null;
+    const dtStr = dt ? `${dt.getMonth()+1}/${dt.getDate()} ${String(dt.getHours()).padStart(2,"0")}:${String(dt.getMinutes()).padStart(2,"0")}` : "";
+    row.innerHTML = `<span class="ntext">${escapeHtml(n.text||"")}<div class="nmeta">${escapeHtml(n.author||"—")}・${dtStr}</div></span>`+
+      `<button class="ndel" data-id="${id}">✕</button>`;
+    row.querySelector(".ndel").onclick = ()=> remove(ref(db,`dayNotes/${dateStr}/${id}`));
+    frag.appendChild(row);
+  });
+  return frag;
+}
+function renderDayNotes(dateStr){
+  const box = $("dayNotesList"); box.innerHTML = "";
+  box.appendChild(buildNoteRows(dateStr));
+}
+$("dayNoteAdd").onclick = ()=>{
+  const text = $("dayNoteInput").value.trim();
+  if(!text || !daySheetDate) return;
+  push(ref(db,`dayNotes/${daySheetDate}`), { text, author:(auth&&auth.name)||"メンバー", createdAt: Date.now() });
+  $("dayNoteInput").value = "";
+};
+$("dayNoteInput").addEventListener("keydown", e=>{ if(e.key==="Enter") $("dayNoteAdd").click(); });
+
+/* カレンダーのアイコンから直接開く、メモ専用モーダル */
+let dayNoteScrimDate = null;
+function openDayNoteModal(dateStr){
+  dayNoteScrimDate = dateStr;
+  const [y,m,d] = dateStr.split("-").map(Number);
+  $("dayNoteScrimTitle").textContent = `📝 ${m}月${d}日のメモ`;
+  const box = $("dayNoteScrimList"); box.innerHTML = "";
+  box.appendChild(buildNoteRows(dateStr));
+  $("dayNoteScrimInput").value = "";
+  openScrim("dayNoteScrim");
+  setTimeout(()=>$("dayNoteScrimInput").focus(),260);
+}
+$("dayNoteScrimAdd").onclick = ()=>{
+  const text = $("dayNoteScrimInput").value.trim();
+  if(!text || !dayNoteScrimDate) return;
+  push(ref(db,`dayNotes/${dayNoteScrimDate}`), { text, author:(auth&&auth.name)||"メンバー", createdAt: Date.now() });
+  $("dayNoteScrimInput").value = "";
+};
+$("dayNoteScrimInput").addEventListener("keydown", e=>{ if(e.key==="Enter") $("dayNoteScrimAdd").click(); });
+$("dayNoteScrimClose").onclick = ()=> closeScrim("dayNoteScrim");
 
 /* ============================================================
    機材予約：自動マッチ ＋ 手動紐付け
@@ -1330,16 +1434,8 @@ $("myColorSave").onclick = async ()=>{
   const textColor = $("myTextColor").value;
   $("myColorSave").disabled = true;
   try{
-    // TeamCal側のカレンダーに即時反映
+    // TeamCal側のカレンダーにのみ反映（色・文字色はkizai-kanriとは独立管理のため同期しない）
     await update(ref(db,"teamcal/calendars/"+cal.id), { ...cal, color, textColor });
-    // kizai-kanri側のユーザーデータにも反映（安全のためトランザクションで更新）
-    const userId = cal.userId || cal.id.replace(/^u/,"");
-    await runTransaction(ref(db,"eqmgr_data/users"), (current)=>{
-      const arr = Array.isArray(current) ? current.slice() : (current ? Object.values(current) : []);
-      const idx = arr.findIndex(u=>u && String(u.id)===String(userId));
-      if(idx>=0){ arr[idx] = { ...arr[idx], color, textColor }; }
-      return arr;
-    });
     toast("色を保存しました");
     if(auth){ auth.name = cal.name; store.set("teamcal_auth_v1", auth); }
     store.set("teamcal_myperson_v1", cal.id);
@@ -1365,11 +1461,11 @@ $("userBtn").onclick = ()=>{
 $("userClose").onclick = ()=> closeScrim("userScrim");
 $("logoutBtn").onclick = logout;
 
-["editScrim","dayScrim","confirmScrim","userScrim","vehResScrim"].forEach(id=>{
+["editScrim","dayScrim","confirmScrim","userScrim","vehResScrim","dayNoteScrim"].forEach(id=>{
   $(id).addEventListener("click", e=>{ if(e.target.id===id) closeScrim(id); });
 });
 document.addEventListener("keydown", e=>{ if(e.key==="Escape")
-  ["editScrim","dayScrim","confirmScrim","userScrim","vehResScrim"].forEach(id=>closeScrim(id)); });
+  ["editScrim","dayScrim","confirmScrim","userScrim","vehResScrim","dayNoteScrim"].forEach(id=>closeScrim(id)); });
 let rz=null; window.addEventListener("resize", ()=>{ clearTimeout(rz); rz=setTimeout(renderGrid,150); });
 
 console.log("TeamCal build", APP_VERSION);
