@@ -1126,7 +1126,9 @@ function openEditor(ev, presetDate){
   const isSynced = !!(ev && ev.sourceReservationId);
   editorReadonly = isSynced;
   $("editTitle").textContent = ev ? (isSynced? "予定を確認（機材予約と連携）" : "予定を編集") : "予定を追加";
-  $("editDelete").style.display = (ev && !isSynced) ? "block" : "none";
+  // 連携予定も削除ボタン自体は表示する（押した際の確認文言・削除範囲はdeleteEvent()側で分岐）
+  $("editDelete").style.display = ev ? "block" : "none";
+  $("editDelete").textContent = isSynced ? "🗑️ 削除（機材予約も削除されます）" : "🗑️ 削除";
   $("editSave").style.display = isSynced ? "none" : "block";
   const today = ymd(now.getFullYear(),now.getMonth(),now.getDate());
   const defaultCal = cals.find(c=>(c.kind||"schedule")==="schedule") || cals[0];
@@ -1199,7 +1201,51 @@ function saveFromEditor(){
 }
 function deleteEvent(){
   const id = editingId;
-  openConfirm("この予定を削除しますか？", ()=>{ remove(ref(db,"teamcal/events/"+id)); closeScrim("editScrim"); toast("削除しました"); });
+  const ev = events.find(e=>e.id===id) || draft;
+
+  if(!ev || !ev.sourceReservationId){
+    // 通常のteamcal予定：これまで通りteamcal側だけを削除
+    openConfirm("この予定を削除しますか？", ()=>{
+      remove(ref(db,"teamcal/events/"+id));
+      closeScrim("editScrim");
+      toast("削除しました");
+    });
+    return;
+  }
+
+  // kizai-kanri連携予定：機材管理システム側の予約データも削除されることを明示して確認
+  openConfirm(
+    "この予定はkizai-kanri（機材管理システム）と連携しています。削除すると、機材管理システム側の予約データも削除されます。よろしいですか？",
+    async ()=>{
+      try{
+        await deleteLinkedEqmgrReservations(ev);
+        await remove(ref(db,"teamcal/events/"+id));
+        closeScrim("editScrim");
+        toast("予定と機材予約を削除しました");
+      }catch(e){
+        console.error(e);
+        toast("削除に失敗しました: "+e.message);
+      }
+    }
+  );
+}
+
+// kizai-kanri連携予定に紐づくeqmgr_data/reservationsのレコードを削除する
+// （renderResSection()と同じ照合ルール：projectGroupId優先、無ければ
+//   利用者・期間・案件名でフォールバック照合）
+async function deleteLinkedEqmgrReservations(ev){
+  await runTransaction(ref(db,"eqmgr_data/reservations"), (current)=>{
+    const arr = Array.isArray(current) ? current.slice() : (current ? Object.values(current) : []);
+    let matched = arr.filter(r=>r.projectGroupId===ev.sourceReservationId);
+    if(matched.length===0){
+      matched = arr.filter(r=>
+        r.userName===ev.assignee && r.startDate===ev.startDate && r.endDate===evEnd(ev) &&
+        (r.projectName||"noname")===(ev.label||"noname"));
+    }
+    if(matched.length===0) return arr; // 一致するものがなければ変更しない
+    const matchedIds = new Set(matched.map(r=>r.id));
+    return arr.filter(r=>!matchedIds.has(r.id));
+  });
 }
 
 /* ============================================================
