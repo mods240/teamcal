@@ -562,6 +562,8 @@ let viewY = now.getFullYear();
 let viewM = now.getMonth();
 let cals = [];
 let events = [];
+let calsFromDb = [];        // teamcal/calendars（Firebase実データ）
+let eventsFromDb = [];      // teamcal/events（Firebase実データ）
 let reservations = [];      // eqmgr_data/reservations（読み取り専用）
 let kUsers = [];            // eqmgr_data/users（車両予約作成時の利用者選択用・読み取り専用）
 let dayNotes = {};          // dayNotes（kizai-kanriとも共有する日付メモ）
@@ -640,6 +642,62 @@ function enterApp(){
 function logout(){ store.del("teamcal_auth_v1"); auth = null; location.reload(); }
 
 /* ============================================================
+   車両カレンダー（kizai-kanriの車両予約から自動合成）
+   ------------------------------------------------------------
+   kizai-kanri側には車両専用のteamcalカレンダーを作成する仕組みが無く、
+   車両の予約もこれまで担当者の通常カレンダーに一緒くたに書き込まれて
+   いたため、「🚗 車両」タブに何も表示されなかった。
+   ここでは eqmgr_data/reservations の isVehicle:true のレコードから、
+   車両ごとの仮想カレンダーと仮想イベントをその場で組み立てて cals/events
+   に合成する（Firebaseへの書き込みは一切行わない、表示専用の合成データ）。
+   ============================================================ */
+function syntheticVehicleCals(){
+  const map = new Map();
+  reservations.forEach(r=>{
+    if(!r.isVehicle) return;
+    const key = "vsyn_" + (r.equipmentId || r.equipmentName || "unknown");
+    if(!map.has(key)){
+      map.set(key, {
+        id: key,
+        name: r.equipmentName || "車両",
+        color: personColorFor(key),
+        textColor: "#ffffff",
+        kind: "vehicle",
+        order: 300,
+        equipmentId: r.equipmentId || null,
+        synthetic: true
+      });
+    }
+  });
+  return [...map.values()];
+}
+function syntheticVehicleEvents(){
+  return reservations.filter(r=>r.isVehicle).map(r=>({
+    id: "vres_" + r.id,
+    calId: "vsyn_" + (r.equipmentId || r.equipmentName || "unknown"),
+    title: r.projectName || "(案件名なし)",
+    label: r.projectName || "",
+    assignee: r.userName || "",
+    allDay: true,
+    startDate: r.startDate,
+    endDate: r.endDate || r.startDate,
+    loc: r.useLocation || "",
+    memo: r.notes || "",
+    reminder: "",
+    // 詳細表示・関連予約一覧には案件単位のprojectGroupIdを使う。
+    // 削除時はこの1レコードだけを消したいので、実際の行IDは別途保持する。
+    sourceReservationId: r.projectGroupId || null,
+    sourceReservationRowId: r.id,
+    synthetic: true,
+    updatedBy: "kizai-kanri", updatedAt: 0
+  }));
+}
+function rebuildDerivedCalsAndEvents(){
+  cals = calsFromDb.concat(syntheticVehicleCals()).sort((a,b)=>(a.order||0)-(b.order||0));
+  events = eventsFromDb.concat(syntheticVehicleEvents());
+}
+
+/* ============================================================
    Firebase リスナー
    ============================================================ */
 function startListeners(){
@@ -658,14 +716,15 @@ function startListeners(){
 
   onValue(ref(db,"teamcal/calendars"), snap=>{
     const v = snap.val();
-    if(!v){ cals = []; renderFilters(); renderGrid(); return; }
-    cals = Object.entries(v).map(([id,c])=>({id,...c})).sort((a,b)=>(a.order||0)-(b.order||0));
+    calsFromDb = v ? Object.entries(v).map(([id,c])=>({id,...c})) : [];
+    rebuildDerivedCalsAndEvents();
     renderFilters(); renderGrid();
   });
 
   onValue(ref(db,"teamcal/events"), snap=>{
     const v = snap.val() || {};
-    events = Object.entries(v).map(([id,e])=> migrateEvent(id,e));
+    eventsFromDb = Object.entries(v).map(([id,e])=> migrateEvent(id,e));
+    rebuildDerivedCalsAndEvents();
     renderGrid();
     if($("dayScrim").classList.contains("show") && daySheetDate) fillDaySheet(daySheetDate);
     if($("editScrim").classList.contains("show") && editingId) renderResSection();
@@ -675,6 +734,9 @@ function startListeners(){
   onValue(ref(db,"eqmgr_data/reservations"), snap=>{
     const v = snap.val() || {};
     reservations = Object.entries(v).map(([id,r])=>({id,...r}));
+    // 車両予約(isVehicle:true)から車両カレンダー/イベントを合成し直す
+    rebuildDerivedCalsAndEvents();
+    renderFilters(); renderGrid();
     if($("editScrim").classList.contains("show") && editingId) renderResSection();
     if($("dayScrim").classList.contains("show") && daySheetDate) fillDaySheet(daySheetDate);
   });
@@ -1123,7 +1185,7 @@ function unlinkReservation(eventId, resId, isManual){
 function openEditor(ev, presetDate){
   editingId = ev ? ev.id : null;
   resPickerOpen = false;
-  const isSynced = !!(ev && ev.sourceReservationId);
+  const isSynced = !!(ev && (ev.sourceReservationId || ev.sourceReservationRowId));
   editorReadonly = isSynced;
   $("editTitle").textContent = ev ? (isSynced? "予定を確認（機材予約と連携）" : "予定を編集") : "予定を追加";
   // 連携予定も削除ボタン自体は表示する（押した際の確認文言・削除範囲はdeleteEvent()側で分岐）
@@ -1202,8 +1264,9 @@ function saveFromEditor(){
 function deleteEvent(){
   const id = editingId;
   const ev = events.find(e=>e.id===id) || draft;
+  const isSynced = !!(ev && (ev.sourceReservationId || ev.sourceReservationRowId));
 
-  if(!ev || !ev.sourceReservationId){
+  if(!ev || !isSynced){
     // 通常のteamcal予定：これまで通りteamcal側だけを削除
     openConfirm("この予定を削除しますか？", ()=>{
       remove(ref(db,"teamcal/events/"+id));
@@ -1213,13 +1276,15 @@ function deleteEvent(){
     return;
   }
 
-  // kizai-kanri連携予定：機材管理システム側の予約データも削除されることを明示して確認
+  // kizai-kanri連携予定（車両カレンダーの合成イベントも含む）：
+  // 機材管理システム側の予約データも削除されることを明示して確認
   openConfirm(
     "この予定はkizai-kanri（機材管理システム）と連携しています。削除すると、機材管理システム側の予約データも削除されます。よろしいですか？",
     async ()=>{
       try{
         await deleteLinkedEqmgrReservations(ev);
-        await remove(ref(db,"teamcal/events/"+id));
+        // 合成イベント（車両カレンダー）はteamcal/eventsに実体が無いため削除しない
+        if(!ev.synthetic) await remove(ref(db,"teamcal/events/"+id));
         closeScrim("editScrim");
         toast("予定と機材予約を削除しました");
       }catch(e){
@@ -1230,17 +1295,23 @@ function deleteEvent(){
   );
 }
 
-// kizai-kanri連携予定に紐づくeqmgr_data/reservationsのレコードを削除する
-// （renderResSection()と同じ照合ルール：projectGroupId優先、無ければ
-//   利用者・期間・案件名でフォールバック照合）
+// kizai-kanri連携予定に紐づくeqmgr_data/reservationsのレコードを削除する。
+// sourceReservationRowId があれば（車両カレンダーの合成イベントなど）その1件だけを
+// 厳密に削除し、無ければ従来通りprojectGroupId優先／利用者・期間・案件名の
+// フォールバック照合で案件全体のレコードを削除する
 async function deleteLinkedEqmgrReservations(ev){
   await runTransaction(ref(db,"eqmgr_data/reservations"), (current)=>{
     const arr = Array.isArray(current) ? current.slice() : (current ? Object.values(current) : []);
-    let matched = arr.filter(r=>r.projectGroupId===ev.sourceReservationId);
-    if(matched.length===0){
-      matched = arr.filter(r=>
-        r.userName===ev.assignee && r.startDate===ev.startDate && r.endDate===evEnd(ev) &&
-        (r.projectName||"noname")===(ev.label||"noname"));
+    let matched;
+    if(ev.sourceReservationRowId){
+      matched = arr.filter(r=>r.id===ev.sourceReservationRowId);
+    }else{
+      matched = arr.filter(r=>r.projectGroupId===ev.sourceReservationId);
+      if(matched.length===0){
+        matched = arr.filter(r=>
+          r.userName===ev.assignee && r.startDate===ev.startDate && r.endDate===evEnd(ev) &&
+          (r.projectName||"noname")===(ev.label||"noname"));
+      }
     }
     if(matched.length===0) return arr; // 一致するものがなければ変更しない
     const matchedIds = new Set(matched.map(r=>r.id));
