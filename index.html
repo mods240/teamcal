@@ -566,6 +566,7 @@ let calsFromDb = [];        // teamcal/calendars（Firebase実データ）
 let eventsFromDb = [];      // teamcal/events（Firebase実データ）
 let reservations = [];      // eqmgr_data/reservations（読み取り専用）
 let kUsers = [];            // eqmgr_data/users（車両予約作成時の利用者選択用・読み取り専用）
+let kEquipment = [];        // eqmgr_data/equipment（車両ごとの指定色を拾うための読み取り専用）
 let dayNotes = {};          // dayNotes（kizai-kanriとも共有する日付メモ）
 let hidden = new Set(store.get("teamcal_hidden_v1", []));
 let weekStart = store.get("teamcal_weekstart_v1", 0); // 0=日曜始まり, 1=月曜始まり
@@ -651,6 +652,12 @@ function logout(){ store.del("teamcal_auth_v1"); auth = null; location.reload();
    車両ごとの仮想カレンダーと仮想イベントをその場で組み立てて cals/events
    に合成する（Firebaseへの書き込みは一切行わない、表示専用の合成データ）。
    ============================================================ */
+// kizai-kanriの車両管理で指定された色があればそれを使い、未設定ならIDから自動生成した色にフォールバックする
+function vehicleColorFromEquipment(equipmentId, equipmentName, fallbackKey){
+  const eq = kEquipment.find(e=>e.id===equipmentId);
+  if(eq && eq.color) return eq.color;
+  return personColorFor(fallbackKey);
+}
 function syntheticVehicleCals(){
   const map = new Map();
   reservations.forEach(r=>{
@@ -660,7 +667,7 @@ function syntheticVehicleCals(){
       map.set(key, {
         id: key,
         name: r.equipmentName || "車両",
-        color: personColorFor(key),
+        color: vehicleColorFromEquipment(r.equipmentId, r.equipmentName, key),
         textColor: "#ffffff",
         kind: "vehicle",
         order: 300,
@@ -739,6 +746,15 @@ function startListeners(){
     renderFilters(); renderGrid();
     if($("editScrim").classList.contains("show") && editingId) renderResSection();
     if($("dayScrim").classList.contains("show") && daySheetDate) fillDaySheet(daySheetDate);
+  });
+
+  // 機材マスタも読み取り専用（車両ごとにkizai-kanri側で指定された表示色を拾うためだけに使う）
+  // kizai-kanri側では機材データは /eqmgr_equipment.json = {equipment:[...], timestamp} という配列形式で保存されている
+  onValue(ref(db,"eqmgr_equipment/equipment"), snap=>{
+    const v = snap.val();
+    kEquipment = Array.isArray(v) ? v.filter(Boolean) : (v ? Object.values(v) : []);
+    rebuildDerivedCalsAndEvents();
+    renderFilters(); renderGrid();
   });
 }
 /* 旧フォーマット(date/start/end)からの自動移行（表示用。保存時に新形式で書き戻る） */
