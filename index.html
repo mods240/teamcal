@@ -359,6 +359,10 @@ input,select{ font-family:inherit; }
       <div><label>開始日</label><input class="input" id="vrStart" type="date"></div>
       <div><label>終了日</label><input class="input" id="vrEnd" type="date"></div>
     </div>
+    <div class="field row2">
+      <div><label>使用開始時刻（任意）</label><input class="input" id="vrStartTime" type="time" step="300"></div>
+      <div><label>返却予定時刻（任意）</label><input class="input" id="vrEndTime" type="time" step="300"></div>
+    </div>
     <div class="field"><label>使用場所</label>
       <input class="input" id="vrLoc" placeholder="例）神戸営業所 発着" autocomplete="off"></div>
     <div class="field"><label>備考</label>
@@ -691,6 +695,8 @@ function syntheticVehicleEvents(){
     loc: r.useLocation || "",
     memo: r.notes || "",
     reminder: "",
+    vehStartTime: r.useStartTime || "",
+    vehEndTime: r.returnTime || "",
     // 詳細表示・関連予約一覧には案件単位のprojectGroupIdを使う。
     // 削除時はこの1レコードだけを消したいので、実際の行IDは別途保持する。
     sourceReservationId: r.projectGroupId || null,
@@ -698,6 +704,12 @@ function syntheticVehicleEvents(){
     synthetic: true,
     updatedBy: "kizai-kanri", updatedAt: 0
   }));
+}
+// 車両の使用開始時刻・返却予定時刻の表示用文字列（どちらも未入力なら空文字）
+function vehTimeLabel(e){
+  const a = e.vehStartTime||"", b = e.vehEndTime||"";
+  if(!a && !b) return "";
+  return (a ? a : "") + (a&&b ? "〜" : "") + (b ? b+"返却" : (a?"開始":""));
 }
 function rebuildDerivedCalsAndEvents(){
   cals = calsFromDb.concat(syntheticVehicleCals()).sort((a,b)=>(a.order||0)-(b.order||0));
@@ -944,7 +956,8 @@ function renderGrid(){
         chip.className = "ev";
         chip.style.background = c.color;
         chip.style.color = c.textColor || "#2B332F";
-        chip.innerHTML = `<span class="t">${escapeHtml(e.title)}</span>`;
+        const vt = vehTimeLabel(e);
+        chip.innerHTML = `<span class="t">${vt?escapeHtml(vt)+" ":""}${escapeHtml(e.title)}</span>`;
       }else{
         chip.className = "ev timed";
         chip.innerHTML = `<span class="bar" style="background:${c.color}"></span>`+
@@ -1009,6 +1022,7 @@ function fillDaySheet(dateStr){
       const span = e.startDate!==evEnd(e) ? `${e.startDate.slice(5)}〜${evEnd(e).slice(5)}` : "";
       const meta = [
         e.allDay ? "終日" : (span ? "" : `${e.startTime||""}${e.endTime?" - "+e.endTime:""}`),
+        vehTimeLabel(e) ? "🕘 "+vehTimeLabel(e) : "",
         span, e.label, e.assignee, e.loc
       ].filter(Boolean).join(" ・ ");
       const it = document.createElement("button"); it.className="day-item";
@@ -1379,6 +1393,7 @@ async function openVehResModal(){
   const today = ymd(now.getFullYear(),now.getMonth(),now.getDate());
   $("vrProject").value = ""; $("vrStart").value = today; $("vrEnd").value = today;
   $("vrLoc").value = ""; $("vrNote").value = "";
+  $("vrStartTime").value = ""; $("vrEndTime").value = "";
   $("vrConflict").style.display = "none";
   delete $("vrSave").dataset.confirmed;
   $("vrUser").innerHTML = `<option value="">読み込み中…</option>`;
@@ -1411,6 +1426,8 @@ $("vrSave").onclick = async ()=>{
   if(eDate < sDate) eDate = sDate;
   const useLocation = $("vrLoc").value.trim();
   const notes = $("vrNote").value.trim();
+  const useStartTime = $("vrStartTime").value || "";
+  const returnTime = $("vrEndTime").value || "";
 
   if(!vehCal){ toast("車両を選択してください"); return; }
   if(!equipmentId){ toast("この車両は機材IDが見つかりません（再同期が必要な可能性があります）"); return; }
@@ -1435,7 +1452,8 @@ $("vrSave").onclick = async ()=>{
       startDate: sDate, endDate: eDate, returnDate: eDate, returnLocation: "",
       equipmentId, equipmentName: vehCal.name, isVehicle: true,
       projectName, notes, qty: 1, rentalItems: [], status: "confirmed",
-      useLocation, userId, userName, syncToTeamCal: true
+      useLocation, userId, userName, syncToTeamCal: true,
+      useStartTime, returnTime
     };
     // eqmgr_data/reservations は配列形式のため、トランザクションで安全に追記する
     await runTransaction(ref(db,"eqmgr_data/reservations"), (current)=>{
@@ -1447,6 +1465,7 @@ $("vrSave").onclick = async ()=>{
     await update(ref(db, "teamcal/events/res_"+projectGroupId+"_veh0"), {
       calId: vehCalId, title: "🚗 "+projectName, label: projectName, assignee: userName,
       allDay: true, startDate: sDate, endDate: eDate, loc: useLocation, memo: notes, reminder: "",
+      vehStartTime: useStartTime, vehEndTime: returnTime,
       sourceReservationId: projectGroupId, projectGroupId,
       updatedBy: (auth&&auth.name)||"TeamCal", updatedAt: Date.now()
     });
