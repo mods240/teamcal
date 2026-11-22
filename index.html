@@ -407,6 +407,11 @@ input,select{ font-family:inherit; }
       <div id="endTimeWrap"><label>終了時刻</label><input class="input" id="fEndTime" type="time" step="300"></div>
     </div>
 
+    <div class="field row2" id="vehTimeWrap" style="display:none;">
+      <div><label>🚗 使用開始時刻</label><input class="input" id="fVehStart" type="time" step="300"></div>
+      <div><label>🚗 返却予定時刻</label><input class="input" id="fVehEnd" type="time" step="300"></div>
+    </div>
+
     <div class="field"><label>場所</label>
       <input class="input" id="fLoc" placeholder="例）スタジオA / 現地集合" autocomplete="off"></div>
 
@@ -578,6 +583,7 @@ let viewMode = store.get("teamcal_viewmode_v1", "schedule"); // "schedule" or "v
 let auth = store.get("teamcal_auth_v1", null);
 let editingId = null;
 let editorReadonly = false;
+let editorVehicleTimeOnly = false;
 let draft = {};
 let daySheetDate = null;
 let listenersStarted = false;
@@ -1116,7 +1122,8 @@ function shownReservations(ev){
   return { shown, auto };
 }
 function resMeta(r){
-  return [r.startDate + (r.endDate&&r.endDate!==r.startDate? "〜"+r.endDate:""), r.userName, r.useLocation].filter(Boolean).join(" ・ ");
+  const vt = r.isVehicle ? vehTimeLabel({vehStartTime:r.useStartTime, vehEndTime:r.returnTime}) : "";
+  return [r.startDate + (r.endDate&&r.endDate!==r.startDate? "〜"+r.endDate:""), vt ? "🕘 "+vt : "", r.userName, r.useLocation].filter(Boolean).join(" ・ ");
 }
 function renderResSection(){
   if(!editingId){
@@ -1221,7 +1228,14 @@ function openEditor(ev, presetDate){
   // 連携予定も削除ボタン自体は表示する（押した際の確認文言・削除範囲はdeleteEvent()側で分岐）
   $("editDelete").style.display = ev ? "block" : "none";
   $("editDelete").textContent = isSynced ? "🗑️ 削除（機材予約も削除されます）" : "🗑️ 削除";
-  $("editSave").style.display = isSynced ? "none" : "block";
+  // 車両予定は連携中でも「使用開始時刻・返却予定時刻」だけはteamcal側から設定できる
+  const isVehEv = !!(ev && (calOf(ev.calId).kind||"schedule")==="vehicle");
+  editorVehicleTimeOnly = isSynced && isVehEv;
+  $("editSave").style.display = (!isSynced || isVehEv) ? "block" : "none";
+  $("editSave").textContent = editorVehicleTimeOnly ? "時刻を保存" : "保存";
+  $("vehTimeWrap").style.display = isVehEv ? "flex" : "none";
+  $("fVehStart").value = (ev && ev.vehStartTime) || "";
+  $("fVehEnd").value   = (ev && ev.vehEndTime)   || "";
   const today = ymd(now.getFullYear(),now.getMonth(),now.getDate());
   const defaultCal = cals.find(c=>(c.kind||"schedule")==="schedule") || cals[0];
   draft = ev ? {...ev} : { calId:(defaultCal&&defaultCal.id)||"work", title:"", allDay:false,
@@ -1265,7 +1279,37 @@ function setAllday(on){
   $("startTimeWrap").style.display = on ? "none" : "block";
   $("endTimeWrap").style.display   = on ? "none" : "block";
 }
+// 車両予定の使用開始時刻・返却予定時刻だけを保存する（連携中の予定の他項目は変更しない）
+async function saveVehicleTimesFromEditor(){
+  const ev = events.find(e=>e.id===editingId) || draft;
+  const st = $("fVehStart").value || "", rt = $("fVehEnd").value || "";
+  const pg = ev.sourceReservationId || null;
+  const rowId = ev.sourceReservationRowId || null;
+  const eqId = calOf(ev.calId).equipmentId || null;
+  try{
+    await runTransaction(ref(db,"eqmgr_data/reservations"), (current)=>{
+      const arr = Array.isArray(current) ? current.slice() : (current ? Object.values(current) : []);
+      return arr.map(r=>{
+        if(!r || !r.isVehicle) return r;
+        const hit = (rowId && r.id===rowId) ||
+                    (pg && r.projectGroupId===pg && eqId && r.equipmentId===eqId) ||
+                    (!rowId && pg && r.id===pg);
+        return hit ? {...r, useStartTime: st, returnTime: rt} : r;
+      });
+    });
+    // teamcal/events に実体があるイベント（teamcal側で作成した車両予約）はそちらも更新
+    if(!ev.synthetic && editingId){
+      await update(ref(db,"teamcal/events/"+editingId), { vehStartTime: st, vehEndTime: rt, updatedBy:(auth&&auth.name)||"", updatedAt: Date.now() });
+    }
+    toast("使用開始・返却予定時刻を保存しました");
+    closeScrim("editScrim");
+  }catch(e){
+    console.error(e);
+    toast("保存に失敗しました: "+e.message);
+  }
+}
 function saveFromEditor(){
+  if(editorVehicleTimeOnly){ saveVehicleTimesFromEditor(); return; }
   const title = $("fTitle").value.trim();
   if(!title){ toast("タイトルを入力してください"); $("fTitle").focus(); return; }
   const sDate = $("fStartDate").value;
